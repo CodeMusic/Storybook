@@ -158,7 +158,7 @@ export default function StoryforgePage(){
           window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
         } catch {}
         // Immediately route to Outline so reseed can begin automatically
-        router.push("/Outline");
+        router.push("/Outline?reseed=1");
         return;
       }
 
@@ -195,7 +195,7 @@ export default function StoryforgePage(){
         autoSeededRef.current = true;
         // Persist cleared outline to ensure fresh seed and navigate
         try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, toc: null, chapters: [], scenes: [], seedSignature: undefined, title, premise, ageRange, genre, chaptersTarget, keypoints, style })); } catch {}
-        router.push("/Outline");
+        router.push("/Outline?reseed=1");
       }
     } catch {}
   }, [hydrated, title, premise, ageRange, genre, chaptersTarget, keypoints, style, router]);

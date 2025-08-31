@@ -86,8 +86,11 @@ export default function OutlinePage()
             return;
           }
         } catch {}
+        // If URL explicitly requests reseed, force it once
+        const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+        const forceReseed = urlParams?.get('reseed') === '1';
         // If we already have a TOC but chapters are empty, normalize and parse without reseeding
-        if (toc && reseedTick === 0 && chapters.length === 0)
+        if (!forceReseed && toc && reseedTick === 0 && chapters.length === 0)
         {
           const normalized = (toc || "")
             .replace(/```[\s\S]*?```/g, "")
@@ -105,8 +108,8 @@ export default function OutlinePage()
           } catch {}
           return;
         }
-        // Do not reseed if we already have a TOC unless explicitly retried
-        if (toc && reseedTick === 0) { return; }
+        // Do not reseed if we already have a TOC unless explicitly retried or forced by URL
+        if (!forceReseed && toc && reseedTick === 0) { return; }
         // Protect against re-entrancy
         if (isSeedingRef.current) { return; }
         // Sanitize inputs to avoid false negatives due to prior corruption
