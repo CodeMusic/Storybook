@@ -70,6 +70,21 @@ export default function OutlinePage()
       try {
         console.log('DEBUG Outline useEffect: hydrated =', hydrated, 'toc =', toc);
         if (!hydrated) { return; }
+        // Detect seed changes to force reseeding
+        const currentSignature = JSON.stringify({ title, premise, ageRange, genre, chaptersTarget, keypoints, style });
+        try {
+          const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
+          const data = raw ? JSON.parse(raw) : {};
+          const storedSignature = data.seedSignature;
+          if (storedSignature !== currentSignature)
+          {
+            // Update signature and clear stale outline to ensure reseed
+            const updated = { ...data, seedSignature: currentSignature, toc: null, chapters: [] };
+            try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); } catch {}
+            setToc(null);
+            setChapters([]);
+          }
+        } catch {}
         // If we already have a TOC but chapters are empty, normalize and parse without reseeding
         if (toc && reseedTick === 0 && chapters.length === 0)
         {
@@ -189,7 +204,7 @@ export default function OutlinePage()
                       <li
                         key={ch.id}
                         className={`rounded-xl border p-3 cursor-pointer ${done ? "border-emerald-300 bg-emerald-50/60" : "border-amber-200 bg-white/70"}`}
-                        onClick={() => router.push(`/Read?chapter=${ch.id}`)}
+                        onClick={() => router.push({ pathname: "/Read", query: { chapter: ch.id, title: (title || "Untitled Codex") } })}
                       >
                         <div className="flex items-center justify-between">
                           <div className="font-serif font-semibold">{ch.id}. {ch.heading}</div>

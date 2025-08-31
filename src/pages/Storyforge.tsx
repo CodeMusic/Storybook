@@ -57,7 +57,8 @@ export default function StoryforgePage(){
       try {
         const raw = window.localStorage.getItem(STORAGE_KEY);
         const data = raw ? JSON.parse(raw) : {};
-        const updated = { ...data, ...payload };
+        // Clear prior outline state so Outline will refetch for a new idea
+        const updated = { ...data, ...payload, toc: null, chapters: [], scenes: [], seedSignature: undefined };
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       } catch {}
       router.push("/Outline");

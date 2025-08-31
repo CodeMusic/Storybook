@@ -75,6 +75,15 @@ export default function ReadPage()
     } catch {}
   }, []);
 
+  // Fallback: use query string title before storage hydration completes
+  useEffect(()=>{
+    const queryTitle = typeof router.query?.title === 'string' ? router.query.title : '';
+    if (!title && queryTitle && queryTitle.trim())
+    {
+      setTitle(queryTitle);
+    }
+  }, [router.query?.title, title]);
+
   // Export full book path
   useEffect(()=>{
     (async ()=>{
@@ -138,6 +147,20 @@ export default function ReadPage()
     return scenes[activeIdx];
   }, [scenes, activeIdx, chapterParam]);
 
+  const prevChapter = useMemo(()=>{
+    if (!chapters.length) return undefined;
+    const prevIdx = Math.max(0, activeIdx - 1);
+    if (prevIdx === activeIdx) return undefined;
+    return chapters[prevIdx];
+  }, [chapters, activeIdx]);
+
+  const nextChapter = useMemo(()=>{
+    if (!chapters.length) return undefined;
+    const nextIdx = Math.min(chapters.length - 1, activeIdx + 1);
+    if (nextIdx === activeIdx) return undefined;
+    return chapters[nextIdx];
+  }, [chapters, activeIdx]);
+
   return (
     <div className="min-h-screen text-amber-950">
       <header className="relative">
@@ -148,7 +171,7 @@ export default function ReadPage()
           <h1 className="mt-2 text-2xl font-serif">{title || "Untitled Codex"}</h1>
         </div>
       </header>
-      <main className="mx-auto max-w-3xl px-4 pb-20">
+      <main className="mx-auto max-w-3xl px-4 pb-32">
         <div className="rounded-2xl border border-amber-300 bg-amber-50/70 p-4 min-h-[240px] relative">
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center rounded-2xl bg-amber-100/60 backdrop-blur-sm">
@@ -169,6 +192,60 @@ export default function ReadPage()
           )}
         </div>
       </main>
+      {/* Bottom navigation for chapter flow */}
+      {!loading && (
+        <div className="fixed bottom-0 left-0 right-0 z-20">
+          <div className="mx-auto max-w-3xl px-4 pb-4">
+            <div className="rounded-2xl border border-amber-300 bg-amber-50/90 backdrop-blur px-3 py-3 shadow-lg flex items-center justify-between gap-3">
+              <button
+                onClick={()=> router.push('/Outline')}
+                className="text-sm underline text-amber-900"
+              >
+                Back to outline
+              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={()=>{
+                    if (!prevChapter) return;
+                    router.push({ pathname: '/Read', query: { chapter: prevChapter.id, title: (title || 'Untitled Codex') } });
+                  }}
+                  disabled={!prevChapter}
+                  className={`rounded-xl border px-4 py-2 text-sm ${!prevChapter? 'opacity-50 cursor-not-allowed' : 'bg-white hover:bg-amber-100'}`}
+                >
+                  {prevChapter ? `Previous: Chapter ${prevChapter.id}` : 'Previous'}
+                </button>
+                {chapters.length>0 && scenes.length >= chapters.length ? (
+                  <>
+                    <button
+                      onClick={()=> router.push('/Outline')}
+                      className="rounded-xl border px-4 py-2 text-sm bg-white hover:bg-amber-100"
+                    >
+                      Return to table of contents
+                    </button>
+                    <button
+                      onClick={()=> router.push('/Read?export=1')}
+                      className="rounded-xl bg-amber-600 text-white px-4 py-2 text-sm hover:bg-amber-700"
+                    >
+                      Export Book
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={()=>{
+                      if (!nextChapter) return;
+                      router.push({ pathname: '/Read', query: { chapter: nextChapter.id, title: (title || 'Untitled Codex') } });
+                    }}
+                    disabled={!nextChapter}
+                    className={`rounded-xl bg-amber-600 text-white px-4 py-2 text-sm hover:bg-amber-700 ${!nextChapter ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    {nextChapter ? `Next: Chapter ${nextChapter.id}` : 'Next'}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
