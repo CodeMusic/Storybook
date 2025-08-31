@@ -93,7 +93,7 @@ export default function StoryforgePage(){
       const context = { title: title || "Untitled Codex", toc, priorHtml: scenes.map(s=>s.html), keypoints, genre, ageRange };
       const { html } = await expandChapter({ context, chapterIndex: idx, influence: influence.trim() || undefined });
       let imageUrl: string | null = null;
-      try { const img = await genImage(`${title}: ${chapterMeta.heading}. ${html.slice(0,180)}...`); imageUrl = img.url; } catch {}
+      try { const img = await genImage(`${title} (ages ${ageRange}): ${chapterMeta.heading}. ${html.slice(0,180)}...`); imageUrl = img.url; } catch {}
       setScenes(prev => [...prev, { chapterId: chapterMeta.id, chapterHeading: chapterMeta.heading, html, imageUrl }]);
       setInfluence("");
     } catch(e:any){ setError(e.message || "Chapter failed"); }
@@ -103,7 +103,11 @@ export default function StoryforgePage(){
   async function onExport(){
     try{
       setLoading(true); setError(null);
-      const { downloadUrl, filename } = await exportBook({ htmlPages: scenes.map(s=>s.html), coverUrl, meta: { title, toc, chapters } });
+      const htmlPagesWithImages = scenes.map(s => {
+        const img = s.imageUrl ? `<img src="${s.imageUrl}" alt="Scene for Chapter ${s.chapterId}: ${s.chapterHeading}" style="max-width:100%;height:auto;border:1px solid #e2c084;border-radius:12px;margin:12px 0;"/>` : "";
+        return `${img}\n${s.html}`;
+      });
+      const { downloadUrl, filename } = await exportBook({ htmlPages: htmlPagesWithImages, coverUrl, meta: { title, toc, chapters } });
       if (downloadUrl)
       {
         const a = document.createElement("a");

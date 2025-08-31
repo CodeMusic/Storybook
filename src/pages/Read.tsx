@@ -17,6 +17,7 @@ export default function ReadPage()
   const [scenes, setScenes] = useState<{ chapterId:number; chapterHeading:string; html:string; imageUrl?:string|null }[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [ageRange, setAgeRange] = useState<string>("6-8");
 
   function coerceHTMLString(raw: string): string
   {
@@ -60,6 +61,7 @@ export default function ReadPage()
         setToc(data.toc || null);
         setChapters(Array.isArray(data.chapters) ? data.chapters : []);
         setCoverUrl(data.coverUrl || null);
+        setAgeRange(data.ageRange || "6-8");
         const loadedScenes = Array.isArray(data.scenes) ? data.scenes : [];
         // Coerce any legacy/plain scenes into HTML and persist fix
         const coerced = loadedScenes.map((s: any) => ({
@@ -90,7 +92,7 @@ export default function ReadPage()
       if (!doExport) return;
       try{
         setLoading(true);
-        const { downloadUrl, filename } = await exportBook({ htmlPages: scenes.map(s=>s.html), coverUrl, meta: { title, toc, chapters } });
+        const { downloadUrl, filename } = await exportBook({ scenes, coverUrl, meta: { title, toc, chapters } });
         if (downloadUrl)
         {
           const a = document.createElement("a");
@@ -113,7 +115,7 @@ export default function ReadPage()
       const idx = chapters.findIndex(c => c.id === chapterParam);
       return idx >= 0 ? idx : 0;
     }
-    return Math.min(scenes.length, Math.max(0, chapters.length ? 0 : 0));
+    return Math.min(scenes.length, Math.max(0, chapters.length ? 0 : 0));   
   }, [chapterParam, chapters, scenes.length]);
 
   async function ensureChapterGenerated()
@@ -126,10 +128,10 @@ export default function ReadPage()
     if (scenes.some(s => s.chapterId === chapterMeta.id)) return;
     try{
       setLoading(true); setError(null);
-      const context = { title, toc, priorHtml: scenes.map(s=>s.html) };
+      const context = { title, toc, priorHtml: scenes.map(s=>s.html), ageRange };
       const { html } = await expandChapter({ context, chapterIndex: idx });
       let imageUrl: string | null = null;
-      try { const img = await genImage(`${title}: ${chapterMeta.heading}. ${html.slice(0,180)}...`); imageUrl = img.url; } catch {}
+      try { const img = await genImage(`${title} (ages ${ageRange}): ${chapterMeta.heading}. ${html.slice(0,180)}...`); imageUrl = img.url; } catch {}
       const next = [...scenes, { chapterId: chapterMeta.id, chapterHeading: chapterMeta.heading, html, imageUrl }];
       setScenes(next);
       // persist

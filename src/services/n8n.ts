@@ -201,20 +201,42 @@ async function postForImageUrl(url: string, payload: any): Promise<string>
 }
 
 export async function genImage(prompt: string){ return { url: await postForImageUrl(ENDPOINTS.image, { prompt }) }; }
-export async function exportBook(book: { htmlPages:string[]; coverUrl?:string|null; meta:any })
+export async function exportBook(book: { htmlPages?:string[]; scenes?: { chapterId:number; chapterHeading:string; html:string; imageUrl?:string|null }[]; coverUrl?:string|null; meta:any })
 {
   // Primary path: generate a standalone HTML file client-side from in-memory content
   try
   {
-    const { htmlPages, coverUrl, meta } = book || ({} as any);
+    const { htmlPages, scenes: sceneItems, coverUrl, meta } = book || ({} as any);
     const title = (meta?.title || "Untitled Codex").toString();
     const safeTitle = title.replace(/[^a-z0-9\- _\(\)\[\]]+/gi, "_").trim() || "storybook";
 
-    const htmlBody = Array.isArray(htmlPages) ? htmlPages.join("\n\n<hr/>\n\n") : "";
+    const chaptersMeta = Array.isArray(meta?.chapters) ? meta.chapters : [];
+    const chaptersForExport: { id:number; heading:string; html:string; imageUrl?:string|null }[] = Array.isArray(sceneItems) && sceneItems.length
+      ? sceneItems.map(s => ({ id: s.chapterId, heading: s.chapterHeading, html: s.html, imageUrl: s.imageUrl }))
+      : (Array.isArray(htmlPages) ? htmlPages : []).map((html, i) => ({
+          id: (chaptersMeta[i]?.id ?? (i + 1)),
+          heading: (chaptersMeta[i]?.heading ?? `Chapter ${i + 1}`),
+          html,
+          imageUrl: null,
+        }));
+
     const coverImg = coverUrl ? `<img src="${coverUrl}" alt="Cover" style="max-width:100%;height:auto;border:1px solid #e2c084;border-radius:12px;margin:12px 0;"/>` : "";
-    const tocHtml = typeof meta?.toc === 'string' && meta.toc.trim()
-      ? `<pre style="white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px;">${meta.toc}</pre>`
+
+    const tocList = chaptersForExport.length
+      ? `<section class="toc card">
+  <h2>Table of Contents</h2>
+  <ol class="toc-list">
+    ${chaptersForExport.map(ch => `<li><a href="#chapter-${ch.id}">${ch.id}. ${escapeHtml(ch.heading)}</a></li>`).join("\n    ")}
+  </ol>
+</section>`
       : "";
+
+    const chaptersHtml = chaptersForExport.map(ch => `
+<article class="chapter" id="chapter-${ch.id}">
+  <h2 class="chapter-title">Chapter ${ch.id}: ${escapeHtml(ch.heading)}</h2>
+  ${ch.imageUrl ? `<img src="${ch.imageUrl}" alt="Chapter ${ch.id} image" />` : ""}
+  <div class="prose">${ch.html}</div>
+</article>`).join("\n\n<hr/>\n\n");
 
     const doc = `<!doctype html>
 <html lang="en">
@@ -232,6 +254,9 @@ export async function exportBook(book: { htmlPages:string[]; coverUrl?:string|nu
     .chapter { margin: 16px 0; }
     .chapter img { max-width:100%; height:auto; border-radius: 8px; border:1px solid #fcd34d; }
     .prose p { line-height: 1.7; margin: 10px 0; }
+    .toc-list { margin: 8px 0 0 20px; }
+    .toc-list li { margin: 6px 0; }
+    .chapter-title { margin-bottom: 8px; }
   </style>
   <meta name="generator" content="Storyforge" />
   <meta name="description" content="Exported Storyforge book" />
@@ -253,9 +278,11 @@ export async function exportBook(book: { htmlPages:string[]; coverUrl?:string|nu
     <div class="card">
       <h1>${title}</h1>
       ${coverImg}
-      ${tocHtml}
     </div>
-    <section class="prose chapter">${htmlBody}</section>
+    ${tocList}
+    <section class="chapters">
+      ${chaptersHtml}
+    </section>
   </main>
 </body>
 </html>`;
