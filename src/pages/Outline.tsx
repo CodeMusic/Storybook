@@ -35,6 +35,8 @@ export default function OutlinePage()
       if (raw)
       {
         const data = JSON.parse(raw);
+        const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+        const forceReseed = urlParams?.get('reseed') === '1';
         // Sanitize corrupted premise but keep the rest of the session
         if (data.premise && data.premise.includes("Cannot access uninitialized variable"))
         {
@@ -50,8 +52,21 @@ export default function OutlinePage()
         setKeypoints(data.keypoints || "");
         setStyle(data.style || "warm, whimsical, gentle-humor");
         setCoverUrl(data.coverUrl || null);
-        setToc(data.toc || null);
-        setChapters(Array.isArray(data.chapters) ? data.chapters : []);
+        // If forced reseed, ignore cached toc/chapters so UI starts clean
+        if (forceReseed)
+        {
+          setToc(null);
+          setChapters([]);
+          try {
+            const updated = { ...data, toc: null, chapters: [], seedSignature: undefined };
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+          } catch {}
+        }
+        else
+        {
+          setToc(data.toc || null);
+          setChapters(Array.isArray(data.chapters) ? data.chapters : []);
+        }
         try {
           const scenes = Array.isArray(data.scenes) ? data.scenes : [];
           const done = scenes.map((s: any) => s?.chapterId).filter((n: any) => typeof n === 'number');

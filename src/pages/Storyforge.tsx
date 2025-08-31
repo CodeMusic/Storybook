@@ -162,19 +162,25 @@ export default function StoryforgePage(){
         return;
       }
 
-      // Fallback: hydrate from cache
+      // Fallback: hydrate from cache; but if URL has ?idea=, clear cached outline to avoid inheritance
       if (data){
         setTitle(data.title || "");
-        setPremise(cachedPremise || "");
+        setPremise(idea || cachedPremise || "");
         setAgeRange(data.ageRange || "6-8");
         setGenre(data.genre || "fantasy");
         setChaptersTarget(typeof data.chaptersTarget === 'number' ? data.chaptersTarget : 8);
         setKeypoints(data.keypoints || "");
         setStyle(data.style || "warm, whimsical, gentle-humor");
-        setToc(data.toc || null);
-        setChapters(Array.isArray(data.chapters) ? data.chapters : []);
+        if (idea){
+          setToc(null);
+          setChapters([]);
+          setScenes([]);
+        } else {
+          setToc(data.toc || null);
+          setChapters(Array.isArray(data.chapters) ? data.chapters : []);
+          setScenes(Array.isArray(data.scenes) ? data.scenes : []);
+        }
         setCoverUrl(data.coverUrl || null);
-        setScenes(Array.isArray(data.scenes) ? data.scenes : []);
         setInfluence("");
       }
     } catch {}
