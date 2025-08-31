@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
 
@@ -6,14 +6,33 @@ export default function Home()
 {
   const router = useRouter();
   const [idea, setIdea] = useState("");
+  const [hasSession, setHasSession] = useState(false);
+  const STORAGE_KEY = "storyforge.session.v1";
 
   function onSubmit(e: React.FormEvent)
   {
     e.preventDefault();
+    // If a new idea is provided, proactively clear any existing session so a fresh seed is guaranteed
+    try {
+      const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
+      const data = raw ? JSON.parse(raw) : {};
+      const updated = { ...data, title: "", premise: idea.trim(), toc: null, chapters: [], scenes: [], seedSignature: undefined };
+      if (typeof window !== 'undefined') { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); }
+    } catch {}
     const q = new URLSearchParams();
     if (idea.trim()) q.set("idea", idea.trim());
     router.push(`/Storyforge${q.toString() ? `?${q.toString()}` : ""}`);
   }
+
+  useEffect(()=>{
+    try{
+      const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
+      if (raw){
+        const data = JSON.parse(raw);
+        setHasSession(!!(data?.toc || (Array.isArray(data?.chapters) && data.chapters.length)));
+      }
+    } catch { setHasSession(false); }
+  }, []);
 
   return (
     <>
@@ -44,6 +63,13 @@ export default function Home()
             Forge My Story
           </button>
         </form>
+        {hasSession && (
+          <div className="max-w-xl mx-auto">
+            <button onClick={()=>router.push("/Outline")} className="mt-2 inline-flex items-center justify-center rounded-xl bg-amber-100 text-amber-900 px-5 py-3 border border-amber-300 w-full">
+              Continue last story
+            </button>
+          </div>
+        )}
       </div>
     </main>
     </>
