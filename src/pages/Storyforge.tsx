@@ -130,15 +130,40 @@ export default function StoryforgePage(){
     setScenes(prev => prev.slice(0, prev.length - 1));
   }
 
-  // Load cached session
+  // Load cached session; prefer ?idea=... and clear stale outline if it differs
   useEffect(()=>{
     try{
       const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
-      if (!raw) { setHydrated(true); return; }
-      const data = JSON.parse(raw);
+      const data = raw ? JSON.parse(raw) : {};
+      const cachedPremise = data?.premise || "";
+
+      // Prefer router idea over cached premise and clear outline if it differs
+      if (idea && idea !== cachedPremise)
+      {
+        setTitle("");
+        setPremise(idea);
+        setAgeRange(data.ageRange || "6-8");
+        setGenre(data.genre || "fantasy");
+        setChaptersTarget(typeof data.chaptersTarget === 'number' ? data.chaptersTarget : 8);
+        setKeypoints(data.keypoints || "");
+        setStyle(data.style || "warm, whimsical, gentle-humor");
+        setToc(null);
+        setChapters([]);
+        setCoverUrl(data.coverUrl || null);
+        setScenes([]);
+        setInfluence("");
+        // Persist the cleared state so subsequent pages don't reuse old outline
+        try {
+          const updated = { ...data, title: "", premise: idea, toc: null, chapters: [], scenes: [], seedSignature: undefined };
+          window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        } catch {}
+        return;
+      }
+
+      // Fallback: hydrate from cache
       if (data){
         setTitle(data.title || "");
-        setPremise(data.premise || idea || "");
+        setPremise(cachedPremise || "");
         setAgeRange(data.ageRange || "6-8");
         setGenre(data.genre || "fantasy");
         setChaptersTarget(typeof data.chaptersTarget === 'number' ? data.chaptersTarget : 8);
@@ -152,8 +177,7 @@ export default function StoryforgePage(){
       }
     } catch {}
     finally { setHydrated(true); }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [idea]);
 
   // Persist session
   useEffect(()=>{

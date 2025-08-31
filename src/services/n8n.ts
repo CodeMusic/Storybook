@@ -238,7 +238,26 @@ export async function exportBook(book: { htmlPages?:string[]; scenes?: { chapter
     const safeTitle = title.replace(/[^a-z0-9\- _\(\)\[\]]+/gi, "_").trim() || "storybook";
 
     const chaptersMeta = Array.isArray(meta?.chapters) ? meta.chapters : [];
-    const chaptersForExport: { id:number; heading:string; html:string; imageUrl?:string|null }[] = Array.isArray(sceneItems) && sceneItems.length
+
+    // Helper: convert blob: URLs to data URLs so they survive in a standalone file
+    async function ensureEmbeddableUrl(possibleUrl: string | null | undefined): Promise<string | null>
+    {
+      const url = (possibleUrl || '').toString();
+      if (!url) { return null; }
+      if (!url.startsWith('blob:')) { return url; }
+      try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const dataUrl: string = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(reader.result as string);
+          reader.readAsDataURL(blob);
+        });
+        return dataUrl;
+      } catch { return null; }
+    }
+
+    const chaptersForExportRaw: { id:number; heading:string; html:string; imageUrl?:string|null }[] = Array.isArray(sceneItems) && sceneItems.length
       ? sceneItems.map(s => ({ id: s.chapterId, heading: s.chapterHeading, html: s.html, imageUrl: s.imageUrl }))
       : (Array.isArray(htmlPages) ? htmlPages : []).map((html, i) => ({
           id: (chaptersMeta[i]?.id ?? (i + 1)),
@@ -247,7 +266,13 @@ export async function exportBook(book: { htmlPages?:string[]; scenes?: { chapter
           imageUrl: null,
         }));
 
-    const coverImg = coverUrl ? `<img src="${coverUrl}" alt="Cover" style="max-width:100%;height:auto;border:1px solid #e2c084;border-radius:12px;margin:12px 0;"/>` : "";
+    const chaptersForExport = await Promise.all(chaptersForExportRaw.map(async ch => ({
+      ...ch,
+      imageUrl: await ensureEmbeddableUrl(ch.imageUrl)
+    })));
+
+    const embeddableCoverUrl = await ensureEmbeddableUrl(coverUrl);
+    const coverImg = embeddableCoverUrl ? `<img src="${embeddableCoverUrl}" alt="Cover" style="max-width:100%;height:auto;border:1px solid #e2c084;border-radius:12px;margin:12px 0;"/>` : "";
 
     const tocList = chaptersForExport.length
       ? `<section class="toc card">
