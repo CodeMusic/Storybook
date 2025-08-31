@@ -90,8 +90,17 @@ export default function ReadPage()
       if (!doExport) return;
       try{
         setLoading(true);
-        const { downloadUrl } = await exportBook({ htmlPages: scenes.map(s=>s.html), coverUrl, meta: { title, toc, chapters } });
-        if (downloadUrl) { window.open(downloadUrl, "_blank"); }
+        const { downloadUrl, filename } = await exportBook({ htmlPages: scenes.map(s=>s.html), coverUrl, meta: { title, toc, chapters } });
+        if (downloadUrl)
+        {
+          const a = document.createElement("a");
+          a.href = downloadUrl;
+          a.download = filename || `${title||"storybook"}.html`;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          if (downloadUrl.startsWith("blob:")) { URL.revokeObjectURL(downloadUrl); }
+        }
       } catch(e:any){ setError(e.message || "Export failed"); }
       finally { setLoading(false); }
     })();

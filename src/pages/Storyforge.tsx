@@ -50,6 +50,25 @@ export default function StoryforgePage(){
   const [influence, setInfluence] = useState("");
   const [hydrated, setHydrated] = useState(false);
 
+  function clearOutlineState()
+  {
+    setToc(null);
+    setChapters([]);
+    setScenes([]);
+  }
+
+  function onChangeTitle(next: string)
+  {
+    setTitle(next);
+    clearOutlineState();
+  }
+
+  function onChangePremise(next: string)
+  {
+    setPremise(next);
+    clearOutlineState();
+  }
+
   async function onSeed(){
     // Persist latest seed details and route to Outline page (where seeding happens)
     try{
@@ -84,8 +103,18 @@ export default function StoryforgePage(){
   async function onExport(){
     try{
       setLoading(true); setError(null);
-      const { downloadUrl } = await exportBook({ htmlPages: scenes.map(s=>s.html), coverUrl, meta: { title, toc, chapters } });
-      if (downloadUrl) { window.open(downloadUrl, "_blank"); return; }
+      const { downloadUrl, filename } = await exportBook({ htmlPages: scenes.map(s=>s.html), coverUrl, meta: { title, toc, chapters } });
+      if (downloadUrl)
+      {
+        const a = document.createElement("a");
+        a.href = downloadUrl;
+        a.download = filename || `${title||"storybook"}.html`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        if (downloadUrl.startsWith("blob:")) { URL.revokeObjectURL(downloadUrl); }
+        return;
+      }
       const blob = new Blob([JSON.stringify({ title, toc, chapters, scenes, coverUrl }, null, 2)], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = `${title||"storybook"}.json`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
@@ -184,11 +213,16 @@ export default function StoryforgePage(){
           <div className="lg:col-span-2">
             <SeedForm
               state={{ title, premise, ageRange, genre, chapters: chaptersTarget, keypoints, style, loading, status, error, baseLabel: (BASE.replace("https://","")) }}
-              actions={{ setTitle, setPremise, setAgeRange, setGenre, setChapters: setChaptersTarget, setKeypoints, setStyle, onSeed, onPrime: async ()=>{
+              actions={{ setTitle: onChangeTitle, setPremise: onChangePremise, setAgeRange, setGenre, setChapters: setChaptersTarget, setKeypoints, setStyle, onSeed, onPrime: async ()=>{
                 try{
                   setLoading(true); setStatus("Fetching seed info…"); setError(null);
                   const { info } = await primeStory({ prompt: idea || premise });
                   if (info){
+                    // Clear outline if prime changes the seed
+                    if ((info.title && info.title !== title) || (info.description && info.description !== premise))
+                    {
+                      clearOutlineState();
+                    }
                     if (info.title) setTitle(info.title);
                     if (info.description) setPremise(prev => prev || info.description || "");
                     if (info.ageRange) setAgeRange(info.ageRange);

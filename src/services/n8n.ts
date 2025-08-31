@@ -201,9 +201,75 @@ async function postForImageUrl(url: string, payload: any): Promise<string>
 }
 
 export async function genImage(prompt: string){ return { url: await postForImageUrl(ENDPOINTS.image, { prompt }) }; }
-export async function exportBook(book: { htmlPages:string[]; coverUrl?:string|null; meta:any }) {
-  try { return { downloadUrl: await postForText(ENDPOINTS.export, book) }; }
-  catch { return { downloadUrl: null }; }
+export async function exportBook(book: { htmlPages:string[]; coverUrl?:string|null; meta:any })
+{
+  // Primary path: generate a standalone HTML file client-side from in-memory content
+  try
+  {
+    const { htmlPages, coverUrl, meta } = book || ({} as any);
+    const title = (meta?.title || "Untitled Codex").toString();
+    const safeTitle = title.replace(/[^a-z0-9\- _\(\)\[\]]+/gi, "_").trim() || "storybook";
+
+    const htmlBody = Array.isArray(htmlPages) ? htmlPages.join("\n\n<hr/>\n\n") : "";
+    const coverImg = coverUrl ? `<img src="${coverUrl}" alt="Cover" style="max-width:100%;height:auto;border:1px solid #e2c084;border-radius:12px;margin:12px 0;"/>` : "";
+    const tocHtml = typeof meta?.toc === 'string' && meta.toc.trim()
+      ? `<pre style="white-space:pre-wrap;font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px;">${meta.toc}</pre>`
+      : "";
+
+    const doc = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title}</title>
+  <style>
+    body { color:#451a03; background:#fffbeb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, \"Apple Color Emoji\", \"Segoe UI Emoji\"; margin: 24px; }
+    h1, h2, h3 { font-family: ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif; color:#7c2d12; }
+    .container { max-width: 780px; margin: 0 auto; }
+    .card { background: rgba(255, 237, 213, 0.6); border: 1px solid #fdba74; border-radius: 16px; padding: 16px; }
+    .meta { color:#92400e; font-size: 0.9rem; }
+    hr { border:0; border-top:1px solid #fed7aa; margin: 24px 0; }
+    .chapter { margin: 16px 0; }
+    .chapter img { max-width:100%; height:auto; border-radius: 8px; border:1px solid #fcd34d; }
+    .prose p { line-height: 1.7; margin: 10px 0; }
+  </style>
+  <meta name="generator" content="Storyforge" />
+  <meta name="description" content="Exported Storyforge book" />
+  <meta name="author" content="Storyforge" />
+  <meta name="storyforge:title" content="${title}" />
+  <meta name="storyforge:chapters" content="${(meta?.chapters?.length || 0).toString()}" />
+  <script>/* Standalone export generated locally without server dependency */</script>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='14' font-size='14'>📜</text></svg>">
+  <meta name="color-scheme" content="light" />
+  <meta name="theme-color" content="#f59e0b" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="${title}" />
+  <meta name="format-detection" content="telephone=no" />
+  <meta name="mobile-web-app-capable" content="yes" />
+</head>
+<body>
+  <main class="container">
+    <div class="card">
+      <h1>${title}</h1>
+      ${coverImg}
+      ${tocHtml}
+    </div>
+    <section class="prose chapter">${htmlBody}</section>
+  </main>
+</body>
+</html>`;
+
+    const blob = new Blob([doc], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    return { downloadUrl: url, filename: `${safeTitle}.html` } as any;
+  }
+  catch
+  {
+    // If anything goes wrong with local generation, fall back to remote export (best-effort)
+    try { return { downloadUrl: await postForText(ENDPOINTS.export, book) }; }
+    catch { return { downloadUrl: null }; }
+  }
 }
 
 export type PrimeInfo = {
