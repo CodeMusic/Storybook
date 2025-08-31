@@ -70,6 +70,25 @@ export default function OutlinePage()
       try {
         console.log('DEBUG Outline useEffect: hydrated =', hydrated, 'toc =', toc);
         if (!hydrated) { return; }
+        // If we already have a TOC but chapters are empty, normalize and parse without reseeding
+        if (toc && reseedTick === 0 && chapters.length === 0)
+        {
+          const normalized = (toc || "")
+            .replace(/```[\s\S]*?```/g, "")
+            .replace(/\*\*(.*?)\*\*/g, "$1")
+            .replace(/^[^\n]*Table of Contents[^\n]*\n?/i, "")
+            .replace(/^Based on[\s\S]*?:\n+/i, "");
+          const parsed = parseTOC(normalized);
+          setToc(normalized);
+          setChapters(parsed);
+          try {
+            const raw = window.localStorage.getItem(STORAGE_KEY);
+            const data = raw ? JSON.parse(raw) : {};
+            const updated = { ...data, toc: normalized, chapters: parsed };
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+          } catch {}
+          return;
+        }
         // Do not reseed if we already have a TOC unless explicitly retried
         if (toc && reseedTick === 0) { return; }
         // Protect against re-entrancy

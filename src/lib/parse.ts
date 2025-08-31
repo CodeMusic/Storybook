@@ -1,25 +1,72 @@
 export type ChapterItem = { id:number; heading:string; synopsis?:string };
 
-export function parseTOC(toc: string): ChapterItem[] {
+export function parseTOC(toc: string): ChapterItem[]
+{
   // Normalize and strip markdown fences and bold markers
   const cleaned = toc
     .replace(/```[\s\S]*?```/g, "")
     .replace(/\*\*(.*?)\*\*/g, "$1");
 
-  const rawLines = cleaned.split(/\r?\n/).map(s=>s.trim());
-  // Keep only lines that look like list items (numbered or bulleted)
-  const listLines = rawLines.filter(Boolean).filter(line => /^(\d+[\).]|[•\-*])\s+/.test(line) || /^\d+\s+/.test(line));
-  let chapterIndex = 1;
-  return listLines.map(line => {
-    // Remove leading numbering/bullets
-    const withoutPrefix = line.replace(/^\s*(?:\d+[\).]|[•\-*])\s*/, "");
-    const body = withoutPrefix.trim();
-    const parts = body.split(/[—\-:\u2013]/);
-    const heading = (parts[0] || "").trim();
-    const synopsis = (parts.slice(1).join("-") || "").trim() || undefined;
-    const id = chapterIndex++;
-    return { id, heading: heading || `Chapter ${id}`, synopsis };
-  });
+  const lines = cleaned.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+  const chapters: ChapterItem[] = [];
+  let idCounter = 1;
+
+  function pushChapter(rawHeading: string, inlineSynopsis?: string)
+  {
+    // Remove markdown heading markers
+    let headingCore = rawHeading.replace(/^#{1,6}\s+/, "").trim();
+    // Drop leading "Chapter N:" style labels from the heading for clarity
+    headingCore = headingCore.replace(/^(?:Chapter|Ch\.?|C)\s*\d+\s*[:.\-]\s*/i, "").trim();
+    const heading = headingCore || `Chapter ${idCounter}`;
+    const synopsis = (inlineSynopsis || "").trim() || undefined;
+    chapters.push({ id: idCounter++, heading, synopsis });
+  }
+
+  for (let i = 0; i < lines.length; i++)
+  {
+    const line = lines[i];
+
+    // 1) Numbered or bulleted list formats
+    const listMatch = line.match(/^\s*(?:\d+[\).]|[•\-*]|\d+\s+)\s*(.*)$/);
+    if (listMatch)
+    {
+      const body = listMatch[1].trim();
+      // Split heading and synopsis on common separators (em dash, en dash, hyphen, colon)
+      const parts = body.split(/[—–\-:]\s+/);
+      const headingPart = (parts[0] || "").replace(/^(?:Chapter|Ch\.?|C)\s*\d+\s*[:.\-]\s*/i, "").trim();
+      const synopsisPart = (parts.slice(1).join(" - ") || "").trim();
+      pushChapter(headingPart, synopsisPart);
+      continue;
+    }
+
+    // 2) Markdown headings like: ## Chapter 1: Title
+    const mdHeading = line.match(/^#{1,6}\s+(.*)$/);
+    if (mdHeading)
+    {
+      // Ignore a top-level TOC heading line
+      if (/table of contents/i.test(mdHeading[1])) { continue; }
+      // If the next non-empty line looks like a paragraph (not another heading or list), treat as synopsis
+      const next = lines[i + 1];
+      const nextLooksLikeSynopsis = next && !/^#{1,6}\s+/.test(next) && !/^\s*(?:\d+[\).]|[•\-*])\s+/.test(next);
+      pushChapter(mdHeading[1], nextLooksLikeSynopsis ? next : undefined);
+      if (nextLooksLikeSynopsis) { i++; }
+      continue;
+    }
+
+    // 3) Plain chapter lines like: Chapter 3: Title
+    const chapterLine = line.match(/^(?:Chapter|Ch\.?|C)\s*\d+\s*[:.\-]\s*(.*)$/i);
+    if (chapterLine)
+    {
+      const next = lines[i + 1];
+      const nextLooksLikeSynopsis = next && !/^(?:Chapter|Ch\.?|C)\s*\d+\s*[:.\-]\s*/i.test(next) && !/^#{1,6}\s+/.test(next) && !/^\s*(?:\d+[\).]|[•\-*])\s+/.test(next);
+      pushChapter(chapterLine[1], nextLooksLikeSynopsis ? next : undefined);
+      if (nextLooksLikeSynopsis) { i++; }
+      continue;
+    }
+  }
+
+  return chapters;
 }
 
 export function buildCoverPromptFromTOC(title: string, toc: string){
