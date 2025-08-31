@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import Head from "next/head";
 import { useRouter } from "next/router";
 
 export default function Home()
@@ -15,6 +16,19 @@ export default function Home()
   }
 
   return (
+    <>
+    <Head>
+      <title>Storyforge — Enchanted story maker</title>
+      <meta name="description" content="Seed a tale and refine chapters as you go." />
+      <meta property="og:title" content="Storyforge — Enchanted story maker" />
+      <meta property="og:description" content="Seed a tale and refine chapters as you go." />
+      <meta property="og:url" content="https://story.codemusic.ca/" />
+      <meta property="og:type" content="website" />
+      <meta property="og:image" content="/Storyforge.png" />
+      <meta name="twitter:title" content="Storyforge — Enchanted story maker" />
+      <meta name="twitter:description" content="Seed a tale and refine chapters as you go." />
+      <meta name="twitter:image" content="/Storyforge.png" />
+    </Head>
     <main className="min-h-screen flex items-center justify-center bg-amber-50 text-amber-950">
       <div className="text-center space-y-4">
         <h1 className="text-3xl md:text-4xl font-serif">Welcome to the Enchanted Storyforge</h1>
@@ -32,6 +46,7 @@ export default function Home()
         </form>
       </div>
     </main>
+    </>
   );
 }
 
