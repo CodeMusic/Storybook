@@ -129,7 +129,9 @@ export default function OutlinePage()
           genre,
           chapters: chaptersTarget,
           keypoints: keypoints || undefined,
-          style
+          style,
+          // Policy hint: request strictly fictionalized content and avoidance of real political figures
+          policyHint: "Fictionalize any sensitive or political content; avoid real names; keep it age-appropriate and non-political."
         };
         console.log('DEBUG Outline: Sending payload to seedStory @', ENDPOINTS?.seed || 'n/a', 'payload =', payload);
         const { toc: tocRaw } = await seedStory(payload);
@@ -217,7 +219,12 @@ export default function OutlinePage()
                 </ol>
               )}
               {!loading && !error && chapters.length===0 && (
-                <div className="text-amber-900/80">No chapters detected. Please adjust your seed or retry.</div>
+                <div className="text-amber-900/80">
+                  <div>No chapters detected. The model may have declined or produced non-TOC text.</div>
+                  <div className="mt-2">
+                    <button onClick={()=>setReseedTick(t=>t+1)} className="rounded-lg bg-amber-600 text-white px-3 py-1 text-xs">Retry seeding</button>
+                  </div>
+                </div>
               )}
             </div>
             <div className="mt-4 flex justify-end gap-2">

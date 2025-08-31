@@ -98,6 +98,29 @@ function coerceTOCString(raw: string): string
   return text;
 }
 
+// Heuristic: detect refusal-style outputs so the UI can present a clear error instead
+function looksLikeRefusal(text: string): boolean
+{
+  const t = (text || "").toLowerCase();
+  if (!t) { return false; }
+  const refusalMarkers = [
+    "i cannot",
+    "i can't",
+    "i won’t",
+    "i will not",
+    "as an ai",
+    "goes against my guidelines",
+    "i'm unable to",
+    "i am unable to",
+    "cannot create a story seed",
+    "policy",
+    "sensitive"
+  ];
+  const containsMarker = refusalMarkers.some(marker => t.includes(marker));
+  const looksLikeTOC = /chapter\s*\d|table of contents|^\s*\d+[\).]/m.test(t);
+  return containsMarker && !looksLikeTOC;
+}
+
 function escapeHtml(unsafe: string): string
 {
   return unsafe
@@ -145,6 +168,10 @@ export async function seedStory(payload: any){
     const raw = await postForText(ENDPOINTS.seed, payload);
     console.log('DEBUG seedStory: raw response =', raw);
     const toc = coerceTOCString(raw);
+    if (looksLikeRefusal(toc))
+    {
+      throw new Error("The model declined to create an outline. We'll fictionalize sensitive content and avoid real names. Please retry.");
+    }
     console.log('DEBUG seedStory: parsed toc =', toc);
     return { toc };
   } catch (error) {
