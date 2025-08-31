@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { motion } from "framer-motion";
 import { Wand2 } from "lucide-react";
@@ -157,6 +157,8 @@ export default function StoryforgePage(){
           const updated = { ...data, title: "", premise: idea, toc: null, chapters: [], scenes: [], seedSignature: undefined };
           window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
         } catch {}
+        // Immediately route to Outline so reseed can begin automatically
+        router.push("/Outline");
         return;
       }
 
@@ -178,6 +180,25 @@ export default function StoryforgePage(){
     } catch {}
     finally { setHydrated(true); }
   }, [idea]);
+
+  // Auto-trigger seeding when the current seed signature differs from the cached one
+  const autoSeededRef = useRef(false);
+  useEffect(()=>{
+    if (!hydrated || autoSeededRef.current) { return; }
+    try{
+      const currentSignature = JSON.stringify({ title, premise, ageRange, genre, chaptersTarget, keypoints, style });
+      const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
+      const data = raw ? JSON.parse(raw) : {};
+      const storedSignature = data?.seedSignature;
+      if (storedSignature !== currentSignature)
+      {
+        autoSeededRef.current = true;
+        // Persist cleared outline to ensure fresh seed and navigate
+        try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...data, toc: null, chapters: [], scenes: [], seedSignature: undefined, title, premise, ageRange, genre, chaptersTarget, keypoints, style })); } catch {}
+        router.push("/Outline");
+      }
+    } catch {}
+  }, [hydrated, title, premise, ageRange, genre, chaptersTarget, keypoints, style, router]);
 
   // Persist session
   useEffect(()=>{
