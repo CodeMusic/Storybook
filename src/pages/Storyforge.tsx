@@ -221,10 +221,10 @@ export default function StoryforgePage(){
           if (info){
             if (typeof (info as any) === 'string'){
               // If agent returned plain text by mistake, use as description
-              setPremise(prev => prev || (info as any) || "");
+              setPremise((info as any) || "");
             } else {
               if (info.title) setTitle(info.title);
-              if (info.description) setPremise(prev => prev || info.description || "");
+              if (info.description) setPremise(info.description);
               if (info.ageRange) setAgeRange(info.ageRange);
               if (info.genre) setGenre(info.genre);
               if (typeof info.chapters === 'number') setChaptersTarget(info.chapters);
@@ -273,7 +273,7 @@ export default function StoryforgePage(){
                       clearOutlineState();
                     }
                     if (info.title) setTitle(info.title);
-                    if (info.description) setPremise(prev => prev || info.description || "");
+                    if (info.description) setPremise(info.description);
                     if (info.ageRange) setAgeRange(info.ageRange);
                     if (info.genre) setGenre(info.genre);
                     if (typeof info.chapters === 'number') setChaptersTarget(info.chapters);
