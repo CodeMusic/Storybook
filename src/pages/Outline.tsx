@@ -70,7 +70,7 @@ export default function OutlinePage()
       try {
         console.log('DEBUG Outline useEffect: hydrated =', hydrated, 'toc =', toc);
         if (!hydrated) { return; }
-        // Detect seed changes to force reseeding
+        // Detect seed changes to force reseeding BEFORE any attempt to reuse an existing TOC
         const currentSignature = JSON.stringify({ title, premise, ageRange, genre, chaptersTarget, keypoints, style });
         try {
           const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
@@ -78,11 +78,12 @@ export default function OutlinePage()
           const storedSignature = data.seedSignature;
           if (storedSignature !== currentSignature)
           {
-            // Update signature and clear stale outline to ensure reseed
             const updated = { ...data, seedSignature: currentSignature, toc: null, chapters: [] };
             try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); } catch {}
             setToc(null);
             setChapters([]);
+            // Short-circuit this run so we don't re-parse stale TOC before state updates
+            return;
           }
         } catch {}
         // If we already have a TOC but chapters are empty, normalize and parse without reseeding
