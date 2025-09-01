@@ -43,10 +43,16 @@ export default function Home()
       <meta property="og:description" content="Seed a tale and refine chapters as you go." />
       <meta property="og:url" content="https://story.codemusic.ca/" />
       <meta property="og:type" content="website" />
-      <meta property="og:image" content="/Storyforge.png" />
+      <meta property="og:image" content="https://story.codemusic.ca/Storyforge.png" />
+      <meta property="og:image:secure_url" content="https://story.codemusic.ca/Storyforge.png" />
+      <meta property="og:image:type" content="image/png" />
+      <meta property="og:image:width" content="1200" />
+      <meta property="og:image:height" content="630" />
+      <meta property="og:image:alt" content="Storyforge cover" />
       <meta name="twitter:title" content="Storyforge — Enchanted story maker" />
       <meta name="twitter:description" content="Seed a tale and refine chapters as you go." />
-      <meta name="twitter:image" content="/Storyforge.png" />
+      <meta name="twitter:image" content="https://story.codemusic.ca/Storyforge.png" />
+      <meta name="twitter:image:alt" content="Storyforge cover" />
     </Head>
     <main className="min-h-screen flex items-center justify-center bg-amber-50 text-amber-950">
       <div className="text-center space-y-4">

@@ -37,9 +37,12 @@ export function SeedForm({ state, actions }:{
               value={ageRange}
               onChange={e=>setAgeRange(e.target.value)}
             >
-              <option value="4-6">4–6</option>
-              <option value="6-8">6–8</option>
-              <option value="8-10">8–10</option>
+              <option value="1-3">1–3</option>
+              <option value="4-8">4–8</option>
+              <option value="9-15">9–15</option>
+              <option value="16-20">16–20</option>
+              <option value="21-25">21-25</option>
+              <option value="25+">25+</option>
             </select>
           </div>
           <div className="col-span-2">

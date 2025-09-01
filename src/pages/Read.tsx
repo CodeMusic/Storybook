@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { CornerUpLeft, Loader2 } from "lucide-react";
 import { expandChapter, genImage, exportBook } from "../services/n8n";
+import { normalizeAgeRange } from "../lib/age";
 
 export default function ReadPage()
 {
@@ -17,7 +18,7 @@ export default function ReadPage()
   const [scenes, setScenes] = useState<{ chapterId:number; chapterHeading:string; html:string; imageUrl?:string|null }[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
-  const [ageRange, setAgeRange] = useState<string>("6-8");
+  const [ageRange, setAgeRange] = useState<string>(normalizeAgeRange("6-8"));
 
   function coerceHTMLString(raw: string): string
   {
@@ -61,7 +62,7 @@ export default function ReadPage()
         setToc(data.toc || null);
         setChapters(Array.isArray(data.chapters) ? data.chapters : []);
         setCoverUrl(data.coverUrl || null);
-        setAgeRange(data.ageRange || "6-8");
+        setAgeRange(normalizeAgeRange(data.ageRange || "6-8"));
         const loadedScenes = Array.isArray(data.scenes) ? data.scenes : [];
         // Coerce any legacy/plain scenes into HTML and persist fix
         const coerced = loadedScenes.map((s: any) => ({
@@ -128,10 +129,10 @@ export default function ReadPage()
     if (scenes.some(s => s.chapterId === chapterMeta.id)) return;
     try{
       setLoading(true); setError(null);
-      const context = { title, toc, priorHtml: scenes.map(s=>s.html), ageRange };
+      const context = { title, toc, priorHtml: scenes.map(s=>s.html), ageRange: normalizeAgeRange(ageRange) };
       const { html } = await expandChapter({ context, chapterIndex: idx });
       let imageUrl: string | null = null;
-      try { const img = await genImage(`${title} (ages ${ageRange}): ${chapterMeta.heading}. ${html.slice(0,180)}...`); imageUrl = img.url; } catch {}
+      try { const img = await genImage(`${title} (ages ${normalizeAgeRange(ageRange)}): ${chapterMeta.heading}. ${html.slice(0,180)}...`); imageUrl = img.url; } catch {}
       const next = [...scenes, { chapterId: chapterMeta.id, chapterHeading: chapterMeta.heading, html, imageUrl }];
       setScenes(next);
       // persist

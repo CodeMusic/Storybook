@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { StepForward, Download, CornerDownRight, CheckCircle2, StepBack } from "lucide-react";
 
-export function Reader({ outline, chapters, scenes, influence, setInfluence, onNext, onExport, onPrev }:{
+export function Reader({ outline, chapters, scenes, influence, setInfluence, onNext, onExport, onPrev, onSceneImageBroken }:{
   outline:any;
   chapters:{ id:number; heading:string; synopsis?:string }[];
   scenes:{ chapterId:number; chapterHeading:string; html:string; imageUrl?:string|null }[];
@@ -13,6 +13,7 @@ export function Reader({ outline, chapters, scenes, influence, setInfluence, onN
   onNext:()=>void;
   onExport:()=>void;
   onPrev:()=>void;
+  onSceneImageBroken?:(idx:number)=>void;
 }){
   const allDone = scenes.length >= chapters.length;
   return (
@@ -54,7 +55,7 @@ export function Reader({ outline, chapters, scenes, influence, setInfluence, onN
             {scenes.map((sc, idx)=>(
               <div key={idx} className="rounded-2xl border border-amber-200 bg-white/70 p-4">
                 <div className="font-serif text-lg mb-2">Chapter {sc.chapterId}: {sc.chapterHeading}</div>
-                {sc.imageUrl && <img src={sc.imageUrl} alt="Scene" className="w-full h-auto rounded-lg border border-amber-200 mb-3" />}
+                {sc.imageUrl && <img src={sc.imageUrl} alt="Scene" className="w-full h-auto rounded-lg border border-amber-200 mb-3" onError={()=> onSceneImageBroken && onSceneImageBroken(idx)} />}
                 {/* eslint-disable-next-line react/no-danger */}
                 <div className="prose prose-amber max-w-none" dangerouslySetInnerHTML={{ __html: sc.html }} />
               </div>

@@ -5,6 +5,7 @@ import { Book, Loader2 } from "lucide-react";
 import { CoverCard } from "../components/CoverCard";
 import { parseTOC, ChapterItem } from "../lib/parse";
 import { seedStory, ENDPOINTS } from "../services/n8n";
+import { normalizeAgeRange } from "../lib/age";
 
 export default function OutlinePage()
 {
@@ -12,7 +13,7 @@ export default function OutlinePage()
   const STORAGE_KEY = "storyforge.session.v1";
   const [title, setTitle] = useState<string>("");
   const [premise, setPremise] = useState<string>("");
-  const [ageRange, setAgeRange] = useState<string>("6-8");
+  const [ageRange, setAgeRange] = useState<string>(normalizeAgeRange("6-8"));
   const [genre, setGenre] = useState<string>("fantasy");
   const [chaptersTarget, setChaptersTarget] = useState<number>(8);
   const [keypoints, setKeypoints] = useState<string>("");
@@ -46,7 +47,7 @@ export default function OutlinePage()
         }
         setTitle(data.title ?? "");
         setPremise(data.premise || "");
-        setAgeRange(data.ageRange || "6-8");
+        setAgeRange(normalizeAgeRange(data.ageRange || "6-8"));
         setGenre(data.genre || "fantasy");
         setChaptersTarget(typeof data.chaptersTarget === 'number' ? data.chaptersTarget : 8);
         setKeypoints(data.keypoints || "");
@@ -86,7 +87,7 @@ export default function OutlinePage()
         console.log('DEBUG Outline useEffect: hydrated =', hydrated, 'toc =', toc);
         if (!hydrated) { return; }
         // Detect seed changes to force reseeding BEFORE any attempt to reuse an existing TOC
-        const currentSignature = JSON.stringify({ title, premise, ageRange, genre, chaptersTarget, keypoints, style });
+        const currentSignature = JSON.stringify({ title, premise, ageRange: normalizeAgeRange(ageRange), genre, chaptersTarget, keypoints, style });
         try {
           const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
           const data = raw ? JSON.parse(raw) : {};
@@ -97,8 +98,7 @@ export default function OutlinePage()
             try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); } catch {}
             setToc(null);
             setChapters([]);
-            // Short-circuit this run so we don't re-parse stale TOC before state updates
-            return;
+            // Do not return here; proceed to seeding immediately with the fresh signature
           }
         } catch {}
         // If URL explicitly requests reseed, force it once
@@ -144,7 +144,7 @@ export default function OutlinePage()
           title: titleSafe || "Untitled Codex",
           premise: premiseSafe || titleSafe,
           prompt: (premiseSafe || titleSafe || "Untitled Codex"),
-          ageRange,
+          ageRange: normalizeAgeRange(ageRange),
           genre,
           chapters: chaptersTarget,
           keypoints: keypoints || undefined,
