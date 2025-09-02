@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { Book, Loader2 } from "lucide-react";
 import { CoverCard } from "../components/CoverCard";
 import { parseTOC, ChapterItem } from "../lib/parse";
-import { seedStory, ENDPOINTS } from "../services/n8n";
+import { seedStory, ENDPOINTS, regenerateSessionId, getSessionId } from "../services/n8n";
 import { normalizeAgeRange } from "../lib/age";
 
 export default function OutlinePage()
@@ -56,6 +56,11 @@ export default function OutlinePage()
         const data = JSON.parse(raw);
         const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
         const forceReseed = urlParams?.get('reseed') === '1';
+        // When arriving with ?reseed=1, begin a fresh story thread session
+        if (forceReseed)
+        {
+          regenerateSessionId();
+        }
         // Sanitize corrupted premise but keep the rest of the session
         if (data.premise && data.premise.includes("Cannot access uninitialized variable"))
         {
@@ -114,6 +119,8 @@ export default function OutlinePage()
           const storedSignature = data.seedSignature;
           if (storedSignature !== currentSignature)
           {
+            // New seed signature = new narrative; regenerate session to isolate the thread
+            regenerateSessionId();
             const updated = { ...data, seedSignature: currentSignature, toc: null, chapters: [] };
             try { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); } catch {}
             setToc(null);
@@ -224,6 +231,9 @@ export default function OutlinePage()
               <Book className="h-6 w-6" />
             </motion.div>
             <motion.h1 initial={{opacity:0, y:0}} animate={{opacity:1, y:0}} className="text-2xl md:text-3xl font-serif tracking-wide">Outline</motion.h1>
+            <button onClick={()=>router.push('/')} className="ml-auto inline-flex items-center text-sm text-amber-900 underline hover:no-underline">
+              Forge New Story
+            </button>
           </div>
           <p className="mt-1 text-amber-900/80">{title || "Untitled Codex"}</p>
         </div>

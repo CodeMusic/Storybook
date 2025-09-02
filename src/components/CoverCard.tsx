@@ -12,7 +12,7 @@ export function CoverCard({ coverUrl, title, onBroken }:{ coverUrl?:string|null;
   return (
     <Card className="bg-amber-50/80 border-amber-300 overflow-hidden">
       {coverUrl && <img src={coverUrl} alt="Cover" className="w-full aspect-[4/3] object-cover" onError={handleError} />}
-      <CardHeader><CardTitle className="text-amber-950">Codex Core</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-amber-950">StoryForge</CardTitle></CardHeader>
       <CardContent className="text-sm">
         <div className="text-amber-900/70 uppercase text-xs">Title</div>
         <div className="font-serif text-lg">{title}</div>

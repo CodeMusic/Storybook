@@ -6,7 +6,7 @@ import { CoverCard } from "../components/CoverCard";
 import { SeedForm } from "../components/SeedForm";
 import { Reader } from "../components/Reader";
 import { parseTOC, buildCoverPromptFromTOC, ChapterItem } from "../lib/parse";
-import { seedStory, expandChapter, genImage, exportBook, BASE, primeStory, PrimeInfo } from "../services/n8n";
+import { seedStory, expandChapter, genImage, exportBook, BASE, primeStory, PrimeInfo, regenerateSessionId } from "../services/n8n";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { normalizeAgeRange, chapterRangeForAgeRange } from "../lib/age";
@@ -73,6 +73,8 @@ export default function StoryforgePage(){
   async function onSeed(){
     // Persist latest seed details and route to Outline page (where seeding happens)
     try{
+      // Fresh cognitive seed: renew session so downstream outline/chapters bind to this arc
+      regenerateSessionId();
       const payload = { title, premise, ageRange: normalizeAgeRange(ageRange), genre, chaptersTarget, keypoints, style, coverUrl };
       try {
         const raw = window.localStorage.getItem(STORAGE_KEY);

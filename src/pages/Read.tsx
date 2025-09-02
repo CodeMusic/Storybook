@@ -82,6 +82,75 @@ export default function ReadPage()
     return markdownToHtmlIncremental(text);
   }
 
+  // Decode common HTML entities (handles &quot; in streamed JSON)
+  function decodeEntities(input: string): string
+  {
+    if (!input) { return input; }
+    let s = input
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>');
+    // Numeric entities
+    s = s.replace(/&#(\d+);/g, (_m, d) => String.fromCharCode(parseInt(d, 10)));
+    s = s.replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCharCode(parseInt(h, 16)));
+    return s;
+  }
+
+  // Remove agent/tool-call protocol frames like: Scene {"name":"WriteNextChapter", ...}
+  function stripAgentProtocol(input: string): string
+  {
+    if (!input) { return input; }
+    let s = decodeEntities(input);
+    // Drop leading "Scene" label
+    s = s.replace(/^\s*Scene\b[\s:]*/i, '');
+    // Attempt to remove JSON tool-call objects
+    // Iterate a few times to clean multiple frames
+    for (let i = 0; i < 3; i++)
+    {
+      const match = s.match(/\{[\s\S]*?\}/);
+      if (!match) { break; }
+      try
+      {
+        const obj = JSON.parse(match[0]);
+        if (obj && typeof obj === 'object' && 'name' in obj && 'parameters' in obj)
+        {
+          s = s.slice(0, match.index || 0) + s.slice((match.index || 0) + match[0].length);
+          continue;
+        }
+      } catch {}
+      break;
+    }
+    return s;
+  }
+
+  // Wrap words in spans for per-word animation
+  function wrapWords(html: string, newlyAddedWordCount: number, options?: { skipFirstWord?: boolean }): string
+  {
+    if (!html || !html.trim()) { return html; }
+    // Split by HTML tags to only wrap text nodes
+    const parts = html.split(/(<[^>]+>)/g);
+    let textWordCounter = 0;
+    let skippedFirst = false;
+    const wrapped = parts.map(part => {
+      if (part.startsWith('<')) { return part; }
+      // Split text into words and spaces, preserving punctuation
+      return part.replace(/([\w'’]+)(\s*)/g, (_m, w: string, space: string) => {
+        textWordCounter++;
+        if (!skippedFirst && options?.skipFirstWord)
+        {
+          skippedFirst = true;
+          return `${w}${space}`;
+        }
+        const isNew = textWordCounter > (Math.max(0, textWordCounter - newlyAddedWordCount));
+        const cls = isNew ? 'word word-new' : 'word';
+        return `<span class="${cls}">${w}<\/span>${space}`;
+      });
+    }).join('');
+    return wrapped;
+  }
+
   function coerceHTMLString(raw: string): string
   {
     const text = (raw || "").toString().trim();
@@ -248,28 +317,33 @@ export default function ReadPage()
       setStreamingHtml("");
       setStreamingImageUrl(null);
 
-      // 1) Kick off image generation first, but don't block streaming
-      const imagePromise: Promise<string | null> = (async ()=>{
-        try {
-          const imgPrompt = `${title || "Untitled Codex"} (ages ${normAge}): Chapter ${chapterMeta.id} - ${chapterMeta.heading}. Genre ${genre}. Style ${style}.`;
-          const img = await genImage(imgPrompt);
-          if (img?.url) { setStreamingImageUrl(img.url); }
-          return img?.url || null;
-        } catch { return null; }
-      })();
+      // 1) Generate image first; keep frost until text streaming begins
+      let resolvedImageUrlEarly: string | null = null;
+      try {
+        const imgPrompt = `${title || "Untitled Codex"} (ages ${normAge}): Chapter ${chapterMeta.id} - ${chapterMeta.heading}. Genre ${genre}. Style ${style}.`;
+        const img = await genImage(imgPrompt);
+        if (img?.url) { resolvedImageUrlEarly = img.url; setStreamingImageUrl(img.url); }
+      } catch { resolvedImageUrlEarly = null; }
 
       // 2) Stream the chapter content and hide spinner on first chunk
       let rawText = "";
       let sawFirstChunk = false;
-      for await (const chunk of expandChapterStream({ context, chapterIndex: idx, influence: influenceBracket }))
+      let prevWordCount = 0;
+      for await (const chunk of expandChapterStream({ context, chapterIndex: idx, influence: influenceBracket, lengthHint }))
       {
-        rawText += chunk;
+        rawText += stripAgentProtocol(chunk);
         if (!sawFirstChunk && chunk && chunk.trim())
         {
           setLoading(false);
           sawFirstChunk = true;
         }
-        setStreamingHtml(renderStreaming(rawText));
+        const htmlNow = renderStreaming(rawText);
+        const plainText = htmlNow.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        const totalWords = plainText ? plainText.split(' ').length : 0;
+        const newly = Math.max(0, totalWords - prevWordCount);
+        const wrapped = wrapWords(htmlNow, newly, { skipFirstWord: true });
+        prevWordCount = totalWords;
+        setStreamingHtml(wrapped);
         // Snapshot progress so we can recover from refresh
         try {
           if (typeof window !== 'undefined') {
@@ -280,10 +354,12 @@ export default function ReadPage()
       }
 
       // Finalize and persist (prefer resolved image, fall back to any streamed URL)
-      const finalHtml = renderStreaming(rawText);
-      let resolvedImageUrl: string | null = null;
-      try { resolvedImageUrl = await imagePromise; } catch { resolvedImageUrl = null; }
-      const finalImageUrl = resolvedImageUrl || streamingImageUrl;
+      const finalHtml = (()=>{
+        const htmlNow = renderStreaming(rawText);
+        // Flash all words briefly
+        return `<div class="words-flash">${wrapWords(htmlNow, 0, { skipFirstWord: true })}<\/div>`;
+      })();
+      const finalImageUrl = resolvedImageUrlEarly || streamingImageUrl;
       const next = [...scenes, { chapterId: chapterMeta.id, chapterHeading: chapterMeta.heading, html: finalHtml, imageUrl: finalImageUrl }];
       setScenes(next);
       try{
@@ -352,7 +428,7 @@ export default function ReadPage()
           <button onClick={()=>router.push('/Outline')} className="inline-flex items-center gap-2 text-amber-900 hover:underline">
             <CornerUpLeft className="h-4 w-4" /> Back to outline
           </button>
-          <h1 className="mt-2 text-2xl font-story-title">{title || "Untitled Codex"}</h1>
+          <h1 className="mt-2 text-2xl font-story-title">{title || "StoryForge"}</h1>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 pb-32">

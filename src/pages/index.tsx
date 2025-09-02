@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import Head from "next/head";
 import { useRouter } from "next/router";
+import { regenerateSessionId } from "../services/n8n";
 
 export default function Home()
 {
@@ -14,6 +15,8 @@ export default function Home()
     e.preventDefault();
     // If a new idea is provided, proactively clear any existing session so a fresh seed is guaranteed
     try {
+      // New narrative arc: regenerate session to bind all subsequent calls
+      regenerateSessionId();
       const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
       const data = raw ? JSON.parse(raw) : {};
       const updated = { ...data, title: "", premise: idea.trim(), toc: null, chapters: [], scenes: [], seedSignature: undefined };

@@ -2,6 +2,7 @@ export const BASE = process.env.NEXT_PUBLIC_N8N_BASE || "https://n8n.codemusic.c
 const N8N_USER = process.env.NEXT_PUBLIC_N8N_USER || "siteuser";
 const N8N_PASS = process.env.NEXT_PUBLIC_N8N_PASS || "codemusai";
 const TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for local models
+const SESSION_KEY = "storyforge.sessionId.v1";
 export const ENDPOINTS = {
   prime: `${BASE}/seedInfo`,        // → JSON basic info from prompt
   seed: `${BASE}/seedStory`,        // → string TOC
@@ -29,6 +30,72 @@ function fetchWithTimeout(url: string, init: RequestInit, timeoutMs = TIMEOUT_MS
   return fetch(url, { ...init, signal: controller.signal }).finally(()=> clearTimeout(id));
 }
 
+// Session identity: used to correlate requests in n8n for a single story thread
+export function getSessionId(): string
+{
+  try
+  {
+    if (typeof window !== 'undefined')
+    {
+      const existing = window.localStorage.getItem(SESSION_KEY);
+      if (existing && existing.trim())
+      {
+        return existing;
+      }
+      const fresh = generateGuid();
+      window.localStorage.setItem(SESSION_KEY, fresh);
+      return fresh;
+    }
+  }
+  catch {}
+  // SSR or storage unavailable: fall back to ephemeral id per process
+  // Note: This won't persist across navigations, but preserves API shape
+  return generateGuid();
+}
+
+export function regenerateSessionId(): string
+{
+  const fresh = generateGuid();
+  try { if (typeof window !== 'undefined') { window.localStorage.setItem(SESSION_KEY, fresh); } } catch {}
+  return fresh;
+}
+
+function generateGuid(): string
+{
+  try
+  {
+    // Prefer Web Crypto if available
+    // @ts-ignore
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
+    {
+      // @ts-ignore
+      return crypto.randomUUID();
+    }
+    // @ts-ignore
+    if (typeof crypto !== 'undefined' && crypto.getRandomValues)
+    {
+      // RFC4122 v4-ish fallback
+      const buf = new Uint8Array(16);
+      // @ts-ignore
+      crypto.getRandomValues(buf);
+      buf[6] = (buf[6] & 0x0f) | 0x40;
+      buf[8] = (buf[8] & 0x3f) | 0x80;
+      const toHex = (n: number) => n.toString(16).padStart(2, '0');
+      const hex = Array.from(buf, toHex).join('');
+      return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+    }
+  }
+  catch {}
+  // Extremely low-tech fallback
+  return `sid_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function withSession<T extends Record<string, any>>(payload: T): T & { sessionId: string }
+{
+  const base: any = (payload && typeof payload === 'object') ? payload : ({} as any);
+  return { ...base, sessionId: getSessionId() } as T & { sessionId: string };
+}
+
 async function postForText(url: string, payload: any): Promise<string> {
   const res = await fetchWithTimeout(url, {
     method: "POST",
@@ -36,7 +103,7 @@ async function postForText(url: string, payload: any): Promise<string> {
       "Content-Type": "application/json",
       "Authorization": basicAuthHeader(),
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(withSession(payload))
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || `Endpoint error ${res.status}`);
@@ -51,7 +118,7 @@ async function postForJson<T>(url: string, payload: any): Promise<T> {
       "Content-Type": "application/json",
       "Authorization": basicAuthHeader(),
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(withSession(payload))
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || `Endpoint error ${res.status}`);
@@ -66,7 +133,7 @@ async function postForRaw(url: string, payload: any): Promise<string>
       "Content-Type": "application/json",
       "Authorization": basicAuthHeader(),
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(withSession(payload))
   });
   const text = await res.text();
   if (!res.ok) throw new Error(text || `Endpoint error ${res.status}`);
@@ -131,29 +198,78 @@ function escapeHtml(unsafe: string): string
     .replace(/'/g, "&#039;");
 }
 
+// Decode common HTML entities from model/tool outputs
+function decodeEntities(input: string): string
+{
+  if (!input) { return input; }
+  let s = input
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+  // Numeric entities
+  s = s.replace(/&#(\d+);/g, (_m, d) => String.fromCharCode(parseInt(d, 10)));
+  s = s.replace(/&#x([0-9a-fA-F]+);/g, (_m, h) => String.fromCharCode(parseInt(h, 16)));
+  return s;
+}
+
 function coerceHTMLString(raw: string): string
 {
   const text = (raw || "").toString().trim();
   if (!text) return "";
-  // Try JSON parsing first and extract common fields
+  // Try JSON parsing first and extract common fields (do not decode before JSON parse)
   try {
     const obj = JSON.parse(text);
     if (Array.isArray(obj) && obj.length > 0)
     {
       const first = obj[0] as any;
-      if (typeof first?.html === 'string') return first.html;
-      if (typeof first?.output === 'string') return coerceHTMLString(first.output);
+      if (typeof first?.html === 'string')
+      {
+        const htmlCandidate = first.html;
+        // If it already looks like HTML, return as-is; otherwise treat as plaintext after decoding
+        return /[<][a-zA-Z!/?]/.test(htmlCandidate) ? htmlCandidate : (()=>{
+          const decoded = decodeEntities(htmlCandidate);
+          const blocks = decoded.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+          const html = blocks.map(block => {
+            const withBreaks = escapeHtml(block).replace(/\n/g, "<br/>");
+            return `<p>${withBreaks}</p>`;
+          }).join("\n");
+          return html;
+        })();
+      }
+      if (typeof first?.output === 'string')
+      {
+        return coerceHTMLString(first.output);
+      }
     }
     if (typeof obj === 'object' && obj)
     {
-      if (typeof (obj as any).html === 'string') return (obj as any).html;
-      if (typeof (obj as any).output === 'string') return coerceHTMLString((obj as any).output);
+      if (typeof (obj as any).html === 'string')
+      {
+        const htmlCandidate = (obj as any).html;
+        return /[<][a-zA-Z!/?]/.test(htmlCandidate) ? htmlCandidate : (()=>{
+          const decoded = decodeEntities(htmlCandidate);
+          const blocks = decoded.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+          const html = blocks.map(block => {
+            const withBreaks = escapeHtml(block).replace(/\n/g, "<br/>");
+            return `<p>${withBreaks}</p>`;
+          }).join("\n");
+          return html;
+        })();
+      }
+      if (typeof (obj as any).output === 'string')
+      {
+        return coerceHTMLString((obj as any).output);
+      }
     }
   } catch {}
+  // Treat as plaintext/markdown; decode entities first to avoid double-escaping
+  const decoded = decodeEntities(text);
   // If it already looks like HTML, return as-is
-  if (/[<][a-zA-Z!/?]/.test(text)) return text;
+  if (/[<][a-zA-Z!/?]/.test(decoded)) return decoded;
   // Basic plaintext/markdown to HTML: paragraphs and line breaks
-  const blocks = text.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+  const blocks = decoded.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
   const html = blocks.map(block => {
     const withBreaks = escapeHtml(block).replace(/\n/g, "<br/>");
     return `<p>${withBreaks}</p>`;
@@ -194,9 +310,10 @@ export async function* expandChapterStream(req: { context:any; chapterIndex:numb
     headers:
     {
       "Content-Type": "application/json",
+      "Accept": "application/x-ndjson, text/event-stream;q=0.9, text/plain;q=0.8, */*;q=0.1",
       "Authorization": basicAuthHeader(),
     },
-    body: JSON.stringify(req)
+    body: JSON.stringify(withSession(req))
   });
 
   if (!res.ok)
@@ -322,7 +439,7 @@ async function postForImageUrl(url: string, payload: any): Promise<string>
       "Content-Type": "application/json",
       "Authorization": basicAuthHeader(),
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(withSession(payload))
   });
   const contentType = res.headers.get("content-type") || "";
   if (!res.ok)
@@ -416,7 +533,7 @@ export async function exportBook(book: { htmlPages?:string[]; scenes?: { chapter
 <article class="chapter" id="chapter-${ch.id}">
   <h2 class="chapter-title">Chapter ${ch.id}: ${escapeHtml(ch.heading)}</h2>
   ${ch.imageUrl ? `<img src="${ch.imageUrl}" alt="Chapter ${ch.id} image" />` : ""}
-  <div class="prose">${ch.html}</div>
+  <div class="prose dropcap">${ch.html}</div>
 </article>`).join("\n\n<hr/>\n\n");
 
     const doc = `<!doctype html>
@@ -425,19 +542,24 @@ export async function exportBook(book: { htmlPages?:string[]; scenes?: { chapter
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${title}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Crimson+Text:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
   <style>
-    body { color:#451a03; background:#fffbeb; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica Neue, Arial, \"Apple Color Emoji\", \"Segoe UI Emoji\"; margin: 24px; }
-    h1, h2, h3 { font-family: ui-serif, Georgia, Cambria, \"Times New Roman\", Times, serif; color:#7c2d12; }
+    body { color:#451a03; background:#fffbeb; font-family: 'Crimson Text', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif; margin: 24px; font-size: 18px; line-height: 1.85; }
+    h1, h2, h3 { font-family: 'IM Fell English', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif; color:#7c2d12; }
     .container { max-width: 780px; margin: 0 auto; }
     .card { background: rgba(255, 237, 213, 0.6); border: 1px solid #fdba74; border-radius: 16px; padding: 16px; }
     .meta { color:#92400e; font-size: 0.9rem; }
     hr { border:0; border-top:1px solid #fed7aa; margin: 24px 0; }
     .chapter { margin: 16px 0; }
     .chapter img { max-width:100%; height:auto; border-radius: 8px; border:1px solid #fcd34d; }
-    .prose p { line-height: 1.7; margin: 10px 0; }
+    .prose p { line-height: 1.85; margin: 10px 0; font-size: 1.05em; }
     .toc-list { margin: 8px 0 0 20px; }
     .toc-list li { margin: 6px 0; }
     .chapter-title { margin-bottom: 8px; }
+    /* Drop cap for first paragraph */
+    .dropcap p:first-of-type::first-letter { float:left; font-family: 'IM Fell English', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif; font-size: 3.2rem; line-height: 1; padding-right: 0.22rem; padding-top: 0.12rem; font-weight: 700; color:#7c2d12; }
   </style>
   <meta name="generator" content="Storyforge" />
   <meta name="description" content="Exported Storyforge book" />
