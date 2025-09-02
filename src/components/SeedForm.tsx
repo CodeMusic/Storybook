@@ -11,6 +11,54 @@ export function SeedForm({ state, actions }:{
 }){
   const { title, premise, ageRange, genre, chapters, keypoints, style, loading, status, error, baseLabel } = state;
   const { setTitle, setPremise, setAgeRange, setGenre, setChapters, setKeypoints, setStyle, onSeed, onPrime } = actions;
+  // Ensure UI can represent any returned age range (e.g., "6-8")
+  const canonicalAgeRanges = ["1-3", "4-8", "6-8", "9-15", "16-20", "21-25", "25+"];
+  const ageRangeOptions = canonicalAgeRanges.includes(ageRange) ? canonicalAgeRanges : [ageRange, ...canonicalAgeRanges];
+  const labelForRange = (r: string) => r.replace("-", "–");
+  // Expanded genre taxonomy for richer creative prompts
+  const genreArchetypes: { value: string; label: string }[] = [
+    { value: "fantasy", label: "Fantasy" },
+    { value: "adventure", label: "Adventure" },
+    { value: "mystery", label: "Mystery" },
+    { value: "sci-fi", label: "Sci‑Fi" },
+    { value: "fairy-tale", label: "Fairy Tale" },
+    { value: "historical", label: "Historical" },
+    { value: "horror", label: "Horror" },
+    { value: "humor", label: "Humor" },
+    { value: "magical-realism", label: "Magical Realism" },
+    { value: "mythology", label: "Mythology" },
+    { value: "fable", label: "Fable" },
+    { value: "superhero", label: "Superhero" },
+    { value: "space-opera", label: "Space Opera" },
+    { value: "cyberpunk", label: "Cyberpunk" },
+    { value: "romance", label: "Romance" },
+    { value: "thriller", label: "Thriller" },
+    { value: "psychological-thriller", label: "Psychological Thriller" },
+    { value: "suspense", label: "Suspense" },
+    { value: "cozy-mystery", label: "Cozy Mystery" },
+    { value: "survival", label: "Survival" },
+    { value: "western", label: "Western" },
+    { value: "family", label: "Family" },
+    { value: "school-life", label: "School Life" },
+    { value: "inspirational", label: "Inspirational" },
+    { value: "moral-allegory", label: "Moral Allegory" },
+    { value: "educational", label: "Educational" },
+    { value: "time-travel", label: "Time Travel" },
+    { value: "science", label: "Science" },
+    { value: "nature", label: "Nature" },
+    { value: "workplace", label: "Workplace" },
+    { value: "war", label: "War" },
+    { value: "crime", label: "Crime" },
+    { value: "culinary", label: "Culinary" },
+    { value: "noir", label: "Noir" },
+    { value: "comedy", label: "Comedy" },
+    { value: "parody", label: "Parody" },
+    { value: "satire", label: "Satire" }
+  ];
+  // Ensure the current selection is always visible even if not in the default taxonomy
+  const genreOptions = genreArchetypes.some(g => g.value === genre)
+    ? genreArchetypes
+    : [{ value: genre, label: genre.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()) }, ...genreArchetypes];
   return (
     <Card className="relative backdrop-blur bg-amber-100/70 border-amber-300 shadow-xl rounded-2xl">
       <CardHeader className="flex justify-between">
@@ -37,12 +85,9 @@ export function SeedForm({ state, actions }:{
               value={ageRange}
               onChange={e=>setAgeRange(e.target.value)}
             >
-              <option value="1-3">1–3</option>
-              <option value="4-8">4–8</option>
-              <option value="9-15">9–15</option>
-              <option value="16-20">16–20</option>
-              <option value="21-25">21-25</option>
-              <option value="25+">25+</option>
+              {ageRangeOptions.map(r => (
+                <option key={r} value={r}>{labelForRange(r)}</option>
+              ))}
             </select>
           </div>
           <div className="col-span-2">
@@ -52,11 +97,9 @@ export function SeedForm({ state, actions }:{
               value={genre}
               onChange={e=>setGenre(e.target.value)}
             >
-              <option value="fantasy">Fantasy</option>
-              <option value="adventure">Adventure</option>
-              <option value="mystery">Mystery</option>
-              <option value="sci-fi">Sci‑Fi</option>
-              <option value="fairy-tale">Fairy Tale</option>
+              {genreOptions.map(g => (
+                <option key={g.value} value={g.value}>{g.label}</option>
+              ))}
             </select>
           </div>
           <div>

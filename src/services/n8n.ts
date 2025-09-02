@@ -179,7 +179,7 @@ export async function seedStory(payload: any){
     throw error;
   }
 }
-export async function expandChapter(req: { context:any; chapterIndex:number; influence?:string })
+export async function expandChapter(req: { context:any; chapterIndex:number; influence?:string; lengthHint?: { range: [number, number]; label: string } })
 {
   const raw = await postForText(ENDPOINTS.chapter, req);
   const html = coerceHTMLString(raw);

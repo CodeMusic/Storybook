@@ -9,7 +9,7 @@ import { parseTOC, buildCoverPromptFromTOC, ChapterItem } from "../lib/parse";
 import { seedStory, expandChapter, genImage, exportBook, BASE, primeStory, PrimeInfo } from "../services/n8n";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { normalizeAgeRange } from "../lib/age";
+import { normalizeAgeRange, chapterRangeForAgeRange } from "../lib/age";
 
 const AncientBackground: React.FC = () => (
   <div className="pointer-events-none fixed inset-0 -z-10">
@@ -91,8 +91,12 @@ export default function StoryforgePage(){
       const idx = scenes.length;
       const chapterMeta = chapters[idx];
       setLoading(true); setError(null);
-      const context = { title: title || "Untitled Codex", toc, priorHtml: scenes.map(s=>s.html), keypoints, genre, ageRange: normalizeAgeRange(ageRange) };
-      const { html } = await expandChapter({ context, chapterIndex: idx, influence: influence.trim() || undefined });
+      const normAge = normalizeAgeRange(ageRange);
+      const lengthHint = chapterRangeForAgeRange(normAge);
+      const context = { title: title || "Untitled Codex", toc, priorHtml: scenes.map(s=>s.html), keypoints, genre, ageRange: normAge, lengthHint, style };
+      const influenceBracket = `[context: genre=${genre}; age=${normAge}; style=${style}; notes=${(keypoints||"").slice(0,120)}]`;
+      const combinedInfluence = (influence && influence.trim()) ? `${influenceBracket} ${influence.trim()}` : influenceBracket;
+      const { html } = await expandChapter({ context, chapterIndex: idx, influence: combinedInfluence });
       let imageUrl: string | null = null;
       try { const img = await genImage(`${title} (ages ${normalizeAgeRange(ageRange)}): ${chapterMeta.heading}. ${html.slice(0,180)}...`); imageUrl = img.url; } catch {}
       setScenes(prev => [...prev, { chapterId: chapterMeta.id, chapterHeading: chapterMeta.heading, html, imageUrl }]);
@@ -186,6 +190,20 @@ export default function StoryforgePage(){
     } catch {}
     finally { setHydrated(true); }
   }, [idea]);
+
+  // Salience: when the desired chapter count changes, invalidate any cached outline
+  useEffect(() =>
+  {
+    if (!hydrated) { return; }
+    clearOutlineState();
+    try
+    {
+      const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
+      const data = raw ? JSON.parse(raw) : {};
+      const updated = { ...data, toc: null, chapters: [], scenes: [], seedSignature: undefined };
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch {}
+  }, [chaptersTarget, hydrated]);
 
   // Auto-trigger seeding when the current seed signature differs from the cached one
   const autoSeededRef = useRef(false);
@@ -335,6 +353,7 @@ export default function StoryforgePage(){
                 onExport={onExport}
                 onPrev={onPrev}
                 onSceneImageBroken={handleSceneImageBroken}
+                ageRange={ageRange}
               />
             </div>
           </div>

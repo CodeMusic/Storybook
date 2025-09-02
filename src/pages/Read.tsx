@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
 import { CornerUpLeft, Loader2 } from "lucide-react";
 import { expandChapter, genImage, exportBook } from "../services/n8n";
-import { normalizeAgeRange } from "../lib/age";
+import { normalizeAgeRange, chapterRangeForAgeRange, proseScaleClassForAgeRange, headingSizeClassForAgeRange } from "../lib/age";
 
 export default function ReadPage()
 {
@@ -19,6 +19,11 @@ export default function ReadPage()
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [ageRange, setAgeRange] = useState<string>(normalizeAgeRange("6-8"));
+  const [genre, setGenre] = useState<string>("fantasy");
+  const [keypoints, setKeypoints] = useState<string>("");
+  const [style, setStyle] = useState<string>("warm, whimsical, gentle-humor");
+  const proseScale = proseScaleClassForAgeRange(ageRange);
+  const headingScale = headingSizeClassForAgeRange(ageRange);
 
   function coerceHTMLString(raw: string): string
   {
@@ -63,6 +68,9 @@ export default function ReadPage()
         setChapters(Array.isArray(data.chapters) ? data.chapters : []);
         setCoverUrl(data.coverUrl || null);
         setAgeRange(normalizeAgeRange(data.ageRange || "6-8"));
+        setGenre(data.genre || "fantasy");
+        setKeypoints(data.keypoints || "");
+        setStyle(data.style || "warm, whimsical, gentle-humor");
         const loadedScenes = Array.isArray(data.scenes) ? data.scenes : [];
         // Coerce any legacy/plain scenes into HTML and persist fix
         const coerced = loadedScenes.map((s: any) => ({
@@ -129,8 +137,11 @@ export default function ReadPage()
     if (scenes.some(s => s.chapterId === chapterMeta.id)) return;
     try{
       setLoading(true); setError(null);
-      const context = { title, toc, priorHtml: scenes.map(s=>s.html), ageRange: normalizeAgeRange(ageRange) };
-      const { html } = await expandChapter({ context, chapterIndex: idx });
+      const normAge = normalizeAgeRange(ageRange);
+      const lengthHint = chapterRangeForAgeRange(normAge);
+      const context = { title, toc, priorHtml: scenes.map(s=>s.html), ageRange: normAge, lengthHint, genre, keypoints, style };
+      const influenceBracket = `[context: genre=${genre}; age=${normAge}; style=${style}; notes=${(keypoints||"").slice(0,120)}]`;
+      const { html } = await expandChapter({ context, chapterIndex: idx, influence: influenceBracket });
       let imageUrl: string | null = null;
       try { const img = await genImage(`${title} (ages ${normalizeAgeRange(ageRange)}): ${chapterMeta.heading}. ${html.slice(0,180)}...`); imageUrl = img.url; } catch {}
       const next = [...scenes, { chapterId: chapterMeta.id, chapterHeading: chapterMeta.heading, html, imageUrl }];
@@ -196,10 +207,10 @@ export default function ReadPage()
           {error && <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-red-800">{error}</div>}
           {activeScene && (
             <div>
-              <div className="font-serif text-xl mb-2">Chapter {activeScene.chapterId}: {activeScene.chapterHeading}</div>
+              <div className={`font-serif ${headingScale} mb-2`}>Chapter {activeScene.chapterId}: {activeScene.chapterHeading}</div>
               {activeScene.imageUrl && <img src={activeScene.imageUrl} alt="Scene" className="w-full h-auto rounded-lg border border-amber-200 mb-3" />}
               {/* eslint-disable-next-line react/no-danger */}
-              <div className="prose prose-amber max-w-none" dangerouslySetInnerHTML={{ __html: activeScene.html }} />
+              <div className={`${proseScale} prose-amber max-w-none`} dangerouslySetInnerHTML={{ __html: activeScene.html }} />
             </div>
           )}
         </div>

@@ -28,6 +28,23 @@ export default function OutlinePage()
   const [reseedTick, setReseedTick] = useState<number>(0);
   const isSeedingRef = useRef<boolean>(false);
 
+  // Cognitive control: ensure chapter count matches the user's intention
+  function enforceChapterCount(list: ChapterItem[], target: number): ChapterItem[]
+  {
+    const safeTarget = Math.max(1, Math.floor(target || 0));
+    const trimmed = list.slice(0, safeTarget).map((ch, i) => ({ ...ch, id: i + 1 }));
+    if (trimmed.length === safeTarget)
+    {
+      return trimmed;
+    }
+    const additions: ChapterItem[] = [];
+    for (let i = trimmed.length; i < safeTarget; i++)
+    {
+      additions.push({ id: i + 1, heading: `Chapter ${i + 1}`, synopsis: undefined });
+    }
+    return [...trimmed, ...additions];
+  }
+
   useEffect(() =>
   {
     // Load session prepared in Storyforge
@@ -112,7 +129,8 @@ export default function OutlinePage()
             .replace(/\*\*(.*?)\*\*/g, "$1")
             .replace(/^[^\n]*Table of Contents[^\n]*\n?/i, "")
             .replace(/^Based on[\s\S]*?:\n+/i, "");
-          const parsed = parseTOC(normalized);
+          const parsedRaw = parseTOC(normalized);
+          const parsed = enforceChapterCount(parsedRaw, chaptersTarget);
           setToc(normalized);
           setChapters(parsed);
           try {
@@ -161,7 +179,8 @@ export default function OutlinePage()
           .replace(/^[^\n]*Table of Contents[^\n]*\n?/i, "")
           .replace(/^Based on[\s\S]*?:\n+/i, "");
         setToc(normalized);
-        const parsed = parseTOC(normalized);
+        const parsedRaw = parseTOC(normalized);
+        const parsed = enforceChapterCount(parsedRaw, chaptersTarget);
         setChapters(parsed);
         // Persist into session so Storyforge can pick up
         try {

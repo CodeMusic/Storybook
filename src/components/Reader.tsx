@@ -3,8 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { StepForward, Download, CornerDownRight, CheckCircle2, StepBack } from "lucide-react";
+import { proseScaleClassForAgeRange, headingSizeClassForAgeRange } from "../lib/age";
 
-export function Reader({ outline, chapters, scenes, influence, setInfluence, onNext, onExport, onPrev, onSceneImageBroken }:{
+export function Reader({ outline, chapters, scenes, influence, setInfluence, onNext, onExport, onPrev, onSceneImageBroken, ageRange }:{
   outline:any;
   chapters:{ id:number; heading:string; synopsis?:string }[];
   scenes:{ chapterId:number; chapterHeading:string; html:string; imageUrl?:string|null }[];
@@ -14,8 +15,11 @@ export function Reader({ outline, chapters, scenes, influence, setInfluence, onN
   onExport:()=>void;
   onPrev:()=>void;
   onSceneImageBroken?:(idx:number)=>void;
+  ageRange?: string;
 }){
   const allDone = scenes.length >= chapters.length;
+  const proseScale = proseScaleClassForAgeRange(ageRange || "6-8");
+  const headingScale = headingSizeClassForAgeRange(ageRange || "6-8");
   return (
     <Card className="bg-amber-50/80 border-amber-300">
       <CardHeader className="flex justify-between">
@@ -54,10 +58,10 @@ export function Reader({ outline, chapters, scenes, influence, setInfluence, onN
             <div className="text-amber-900/70 uppercase text-xs">Story so far</div>
             {scenes.map((sc, idx)=>(
               <div key={idx} className="rounded-2xl border border-amber-200 bg-white/70 p-4">
-                <div className="font-serif text-lg mb-2">Chapter {sc.chapterId}: {sc.chapterHeading}</div>
+                <div className={`font-serif ${headingScale} mb-2`}>Chapter {sc.chapterId}: {sc.chapterHeading}</div>
                 {sc.imageUrl && <img src={sc.imageUrl} alt="Scene" className="w-full h-auto rounded-lg border border-amber-200 mb-3" onError={()=> onSceneImageBroken && onSceneImageBroken(idx)} />}
                 {/* eslint-disable-next-line react/no-danger */}
-                <div className="prose prose-amber max-w-none" dangerouslySetInnerHTML={{ __html: sc.html }} />
+                <div className={`${proseScale} prose-amber max-w-none`} dangerouslySetInnerHTML={{ __html: sc.html }} />
               </div>
             ))}
           </div>
