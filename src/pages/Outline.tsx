@@ -11,6 +11,7 @@ export default function OutlinePage()
 {
   const router = useRouter();
   const STORAGE_KEY = "storyforge.session.v1";
+  const SEED_LOCK_KEY = "storyforge.seed.lock.v1";
   const [title, setTitle] = useState<string>("");
   const [premise, setPremise] = useState<string>("");
   const [ageRange, setAgeRange] = useState<string>(normalizeAgeRange("6-8"));
@@ -75,8 +76,10 @@ export default function OutlinePage()
         {
           setToc(null);
           setChapters([]);
+          // Purge prior salience notes to prevent leakage into the new outline
+          setKeypoints("");
           try {
-            const updated = { ...data, toc: null, chapters: [], seedSignature: undefined };
+            const updated = { ...data, toc: null, chapters: [], seedSignature: undefined, keypoints: "" };
             window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
           } catch {}
         }
@@ -145,12 +148,22 @@ export default function OutlinePage()
         if (!forceReseed && toc && reseedTick === 0) { return; }
         // Protect against re-entrancy
         if (isSeedingRef.current) { return; }
+        // Prevent duplicate calls caused by rapid re-renders by using a session-level lock keyed by signature
+        try {
+          const lock = typeof window !== 'undefined' ? window.sessionStorage.getItem(SEED_LOCK_KEY) : null;
+          if (!forceReseed && reseedTick === 0 && lock === currentSignature)
+          {
+            console.log('DEBUG Outline: Seeding locked for signature, skipping duplicate call');
+            return;
+          }
+        } catch {}
         // Sanitize inputs to avoid false negatives due to prior corruption
         const corruptedToken = "Cannot access uninitialized variable";
         const titleSafe = (title && !title.includes(corruptedToken)) ? title : "";
         const premiseSafe = (premise && !premise.includes(corruptedToken)) ? premise : "";
         console.log('DEBUG Outline: evaluating seed readiness. titleSafe =', titleSafe, 'premiseSafe =', premiseSafe);
         setLoading(true); setError(null); isSeedingRef.current = true;
+        try { if (typeof window !== 'undefined') { window.sessionStorage.setItem(SEED_LOCK_KEY, currentSignature); } } catch {}
         if (!((titleSafe && titleSafe.trim()) || (premiseSafe && premiseSafe.trim())))
         {
           console.log('DEBUG Outline: Missing title/premise after sanitize, setting error');
@@ -194,6 +207,7 @@ export default function OutlinePage()
       } finally {
         setLoading(false);
         isSeedingRef.current = false;
+        try { if (typeof window !== 'undefined') { window.sessionStorage.removeItem(SEED_LOCK_KEY); } } catch {}
         // Reset the retry trigger if used
         if (reseedTick > 0) { setReseedTick(0); }
       }

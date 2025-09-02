@@ -66,6 +66,23 @@ export function parseTOC(toc: string): ChapterItem[]
     }
   }
 
+  // Fallback: plain-title list (e.g., lines like "The Magic Book  ")
+  if (chapters.length === 0)
+  {
+    const titleOnly = lines
+      .map(s => s.replace(/\s{2,}$/, "").trim()) // remove trailing markdown linebreak spaces
+      .filter(Boolean)
+      .filter(s => !/^table of contents$/i.test(s));
+
+    if (titleOnly.length >= 2)
+    {
+      for (const title of titleOnly)
+      {
+        pushChapter(title);
+      }
+    }
+  }
+
   return chapters;
 }
 

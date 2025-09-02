@@ -185,6 +185,135 @@ export async function expandChapter(req: { context:any; chapterIndex:number; inf
   const html = coerceHTMLString(raw);
   return { html };
 }
+
+// Streamed chapter expansion for visual, incremental rendering on the chapter screen
+export async function* expandChapterStream(req: { context:any; chapterIndex:number; influence?:string; lengthHint?: { range: [number, number]; label: string } }): AsyncGenerator<string, void, unknown>
+{
+  const res = await fetchWithTimeout(ENDPOINTS.chapter, {
+    method: "POST",
+    headers:
+    {
+      "Content-Type": "application/json",
+      "Authorization": basicAuthHeader(),
+    },
+    body: JSON.stringify(req)
+  });
+
+  if (!res.ok)
+  {
+    const t = await res.text().catch(()=>"");
+    throw new Error(t || `Endpoint error ${res.status}`);
+  }
+
+  const contentType = res.headers.get("content-type") || "";
+  const reader = res.body?.getReader();
+  if (!reader)
+  {
+    // Fallback to non-streaming if the platform/browser does not support it
+    const fallback = await res.text();
+    yield fallback;
+    return;
+  }
+
+  const decoder = new TextDecoder();
+  let buffered = "";
+  const isSSE = /text\/event-stream/i.test(contentType);
+
+  while (true)
+  {
+    const { value, done } = await reader.read();
+    if (done) { break; }
+    const chunk = decoder.decode(value, { stream: true });
+    if (!chunk) { continue; }
+
+    if (isSSE)
+    {
+      // SSE parsing: lines beginning with data:
+      buffered += chunk;
+      const lines = buffered.split(/\r?\n/);
+      buffered = lines.pop() || "";
+      for (const line of lines)
+      {
+        if (!line.startsWith("data:")) { continue; }
+        const data = line.slice(5).trimStart();
+        if (!data || data === "[DONE]") { continue; }
+        try
+        {
+          const obj = JSON.parse(data);
+          if (obj && obj.type === "item" && typeof obj.content === "string")
+          {
+            yield obj.content;
+          }
+          else if (typeof obj === 'string')
+          {
+            yield obj;
+          }
+        }
+        catch
+        {
+          // If not JSON payload, treat as raw text
+          yield data + "\n";
+        }
+      }
+      continue;
+    }
+
+    // NDJSON or whitespace-delimited JSON objects
+    // Normalize boundaries like `}{` across chunks into separate lines
+    buffered += chunk;
+    buffered = buffered.replace(/}\s*\{/g, "}\n{");
+    const parts = buffered.split(/\r?\n/);
+    buffered = parts.pop() || "";
+    for (const part of parts)
+    {
+      const line = part.trim();
+      if (!line) { continue; }
+      // Some streams may concatenate multiple JSONs on one line; split again conservatively
+      const maybeMany = line.replace(/}\s*\{/g, "}\n{").split(/\r?\n/);
+      for (const token of maybeMany)
+      {
+        const t = token.trim();
+        if (!t || t === "[DONE]") { continue; }
+        try
+        {
+          const obj = JSON.parse(t);
+          if (obj?.type === "item" && typeof obj.content === "string")
+          {
+            yield obj.content;
+          }
+          else if (typeof obj === 'string')
+          {
+            yield obj;
+          }
+          // ignore begin/end/metadata frames silently
+        }
+        catch
+        {
+          // Not a full JSON yet; push back into buffer
+          buffered = t;
+        }
+      }
+    }
+  }
+
+  // Attempt to parse any trailing buffered JSON token
+  const tail = (buffered || "").trim();
+  if (tail && tail !== "[DONE]")
+  {
+    try
+    {
+      const obj = JSON.parse(tail);
+      if (obj?.type === "item" && typeof obj.content === "string")
+      {
+        yield obj.content;
+      }
+      else if (typeof obj === 'string')
+      {
+        yield obj;
+      }
+    } catch { /* swallow */ }
+  }
+}
 async function postForImageUrl(url: string, payload: any): Promise<string>
 {
   const res = await fetchWithTimeout(url, {

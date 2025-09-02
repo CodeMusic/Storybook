@@ -150,7 +150,8 @@ export default function StoryforgePage(){
         setAgeRange(normalizeAgeRange(data.ageRange || "6-8"));
         setGenre(data.genre || "fantasy");
         setChaptersTarget(typeof data.chaptersTarget === 'number' ? data.chaptersTarget : 8);
-        setKeypoints(data.keypoints || "");
+        // New cognitive seed: purge prior salience notes to avoid leakage into a new narrative
+        setKeypoints("");
         setStyle(data.style || "warm, whimsical, gentle-humor");
         setToc(null);
         setChapters([]);
@@ -159,7 +160,7 @@ export default function StoryforgePage(){
         setInfluence("");
         // Persist the cleared state so subsequent pages don't reuse old outline
         try {
-          const updated = { ...data, title: "", premise: idea, toc: null, chapters: [], scenes: [], seedSignature: undefined };
+          const updated = { ...data, title: "", premise: idea, toc: null, chapters: [], scenes: [], seedSignature: undefined, keypoints: "" };
           window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
         } catch {}
         // Stay on Storyforge so user can review/edit before building outline
@@ -173,12 +174,18 @@ export default function StoryforgePage(){
         setAgeRange(normalizeAgeRange(data.ageRange || "6-8"));
         setGenre(data.genre || "fantasy");
         setChaptersTarget(typeof data.chaptersTarget === 'number' ? data.chaptersTarget : 8);
-        setKeypoints(data.keypoints || "");
+        // If a fresh idea is present, start with empty keypoints to prevent priming carry-over
+        setKeypoints(idea ? "" : (data.keypoints || ""));
         setStyle(data.style || "warm, whimsical, gentle-humor");
         if (idea){
           setToc(null);
           setChapters([]);
           setScenes([]);
+          // Persist cleared keypoints alongside outline reset for a fresh narrative context
+          try {
+            const updated = { ...data, keypoints: "", toc: null, chapters: [], scenes: [], seedSignature: undefined };
+            window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+          } catch {}
         } else {
           setToc(data.toc || null);
           setChapters(Array.isArray(data.chapters) ? data.chapters : []);

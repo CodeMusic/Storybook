@@ -6,4 +6,53 @@ html, body, #__next {
   height: 100%;
 }
 
+/* Storybook typography */
+.font-story-title {
+  font-family: 'IM Fell English', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+.font-story-body {
+  font-family: 'Crimson Text', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+.prose-story {
+  font-size: 1.125rem; /* larger body text */
+  line-height: 1.85;
+}
+
+/* Drop cap first letter */
+.dropcap p:first-of-type::first-letter {
+  float: left;
+  font-size: 3.25rem;
+  line-height: 1;
+  padding-right: 0.2rem;
+  padding-top: 0.1rem;
+  font-weight: 700;
+  font-family: 'IM Fell English', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  color: #7c2d12;
+}
+
+/* Word landing animation */
+@keyframes story-hit {
+  0% { text-shadow: 0 0 0 rgba(245, 158, 11, 0); transform: scale(0.98); }
+  40% { text-shadow: 0 0 18px rgba(245, 158, 11, 0.65); transform: scale(1.01); }
+  100% { text-shadow: 0 0 0 rgba(245, 158, 11, 0); transform: scale(1.0); }
+}
+.story-hit {
+  animation: story-hit 420ms ease-out;
+}
+
+/* Page turn animation */
+@keyframes page-turn {
+  0% { transform: rotateY(0deg); transform-origin: left center; }
+  100% { transform: rotateY(-15deg); transform-origin: left center; }
+}
+.page-turning {
+  perspective: 1200px;
+}
+.page-turning .page {
+  transform-style: preserve-3d;
+}
+.page-turning.is-turning .page {
+  animation: page-turn 450ms ease;
+}
+
 
