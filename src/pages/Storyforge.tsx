@@ -33,6 +33,7 @@ export default function StoryforgePage(){
   const router = useRouter();
   const idea = typeof router.query?.idea === 'string' ? router.query.idea : "";
   const STORAGE_KEY = "storyforge.session.v1";
+  const PRIME_LOCK_KEY = "storyforge.prime.lock.v1";
   const [title, setTitle] = useState("");
   const [premise, setPremise] = useState(idea || "");
   const [ageRange, setAgeRange] = useState(normalizeAgeRange("6-8"));
@@ -50,6 +51,7 @@ export default function StoryforgePage(){
   const [scenes, setScenes] = useState<{ chapterId:number; chapterHeading:string; html:string; imageUrl?:string|null }[]>([]);
   const [influence, setInfluence] = useState("");
   const [hydrated, setHydrated] = useState(false);
+  const primeLockRef = useRef(false);
 
   function clearOutlineState()
   {
@@ -248,6 +250,14 @@ export default function StoryforgePage(){
     if (!hydrated) return;
     (async () => {
       if (idea && !chapters.length && !toc){
+        // Idempotency guard: avoid duplicate prime/genImage under React Strict Mode
+        try {
+          const sig = JSON.stringify({ idea });
+          const lockedSig = typeof window !== 'undefined' ? window.sessionStorage.getItem(PRIME_LOCK_KEY) : null;
+          if (primeLockRef.current || lockedSig === sig) { return; }
+          primeLockRef.current = true;
+          if (typeof window !== 'undefined') { window.sessionStorage.setItem(PRIME_LOCK_KEY, sig); }
+        } catch {}
         try{
           setLoading(true); setStatus("Fetching seed info…");
           const { info } = await primeStory({ prompt: idea });
