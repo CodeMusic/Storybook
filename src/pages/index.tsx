@@ -28,6 +28,17 @@ export default function Home()
   }
 
   useEffect(()=>{
+    // If user lands on production root, always start a fresh n8n session id
+    try {
+      if (typeof window !== 'undefined')
+      {
+        const isProdRoot = window.location.hostname === 'story.codemusic.ca' && (window.location.pathname === '/' || window.location.pathname === '');
+        if (isProdRoot)
+        {
+          regenerateSessionId();
+        }
+      }
+    } catch {}
     try{
       const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
       if (raw){
