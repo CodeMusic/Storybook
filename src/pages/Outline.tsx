@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { Book, Loader2 } from "lucide-react";
 import { CoverCard } from "../components/CoverCard";
 import { parseTOC, ChapterItem } from "../lib/parse";
-import { seedStory, ENDPOINTS, regenerateSessionId, getSessionId } from "../services/n8n";
+import { seedStory, ENDPOINTS, regenerateSessionId, getSessionId, exportBook, exportStoryPackage } from "../services/n8n";
 import { normalizeAgeRange } from "../lib/age";
 
 export default function OutlinePage()
@@ -16,6 +16,7 @@ export default function OutlinePage()
   const [premise, setPremise] = useState<string>("");
   const [ageRange, setAgeRange] = useState<string>(normalizeAgeRange("6-8"));
   const [genre, setGenre] = useState<string>("fantasy");
+  const [chapterLength, setChapterLength] = useState<string>("short");
   const [chaptersTarget, setChaptersTarget] = useState<number>(8);
   const [keypoints, setKeypoints] = useState<string>("");
   const [style, setStyle] = useState<string>("warm, whimsical, gentle-humor");
@@ -72,6 +73,7 @@ export default function OutlinePage()
         setPremise(data.premise || "");
         setAgeRange(normalizeAgeRange(data.ageRange || "6-8"));
         setGenre(data.genre || "fantasy");
+        setChapterLength(data.chapterLength || "medium");
         setChaptersTarget(typeof data.chaptersTarget === 'number' ? data.chaptersTarget : 8);
         setKeypoints(data.keypoints || "");
         setStyle(data.style || "warm, whimsical, gentle-humor");
@@ -112,7 +114,7 @@ export default function OutlinePage()
         console.log('DEBUG Outline useEffect: hydrated =', hydrated, 'toc =', toc);
         if (!hydrated) { return; }
         // Detect seed changes to force reseeding BEFORE any attempt to reuse an existing TOC
-        const currentSignature = JSON.stringify({ title, premise, ageRange: normalizeAgeRange(ageRange), genre, chaptersTarget, keypoints, style });
+        const currentSignature = JSON.stringify({ title, premise, ageRange: normalizeAgeRange(ageRange), genre, chapterLength, chaptersTarget, keypoints, style });
         try {
           const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
           const data = raw ? JSON.parse(raw) : {};
@@ -184,6 +186,7 @@ export default function OutlinePage()
           prompt: (premiseSafe || titleSafe || "Untitled Codex"),
           ageRange: normalizeAgeRange(ageRange),
           genre,
+          chapterLength,
           chapters: chaptersTarget,
           keypoints: keypoints || undefined,
           style,

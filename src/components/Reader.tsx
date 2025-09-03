@@ -20,6 +20,33 @@ export function Reader({ outline, chapters, scenes, influence, setInfluence, onN
   const allDone = scenes.length >= chapters.length;
   const proseScale = proseScaleClassForAgeRange(ageRange || "6-8");
   const headingScale = headingSizeClassForAgeRange(ageRange || "6-8");
+  function stripFirstHeadingTag(html: string): string
+  {
+    if (!html || !html.trim()) { return html; }
+    const re = /^\s*((?:<div[^>]*class=\"[^\"]*words-flash[^\"]*\"[^>]*>\s*)?)(<h[1-6][^>]*>[\s\S]*?<\/h[1-6]>\s*)/i;
+    return html.replace(re, (_m, prefix) => `${prefix}`);
+  }
+  function stripLeadingChapterLabel(html: string): string
+  {
+    if (!html || !html.trim()) { return html; }
+    const rePara = /^\s*((?:<div[^>]*class=\"[^\"]*words-flash[^\"]*\"[^>]*>\s*)?(?:<p[^>]*>\s*)?)\s*Chapter\s+[^:]{1,80}:\s*/i;
+    const withoutParaPrefix = html.replace(rePara, (_m, prefix) => `${prefix}`);
+    if (withoutParaPrefix !== html) { return withoutParaPrefix; }
+    const reRaw = /^\s*Chapter\s+[^:]{1,80}:\s*/i;
+    return html.replace(reRaw, "");
+  }
+  function extractChapterTitleFromHtml(html: string): string | null
+  {
+    if (!html || !html.trim()) { return null; }
+    const s = html.toString();
+    const reTag = /^\s*(?:<div[^>]*class=\"[^\"]*words-flash[^\"]*\"[^>]*>\s*)?(?:<h[1-6][^>]*>|<p[^>]*>)\s*Chapter\s+[^:]{1,80}:\s*([^<\n]{1,160})/i;
+    const m1 = s.match(reTag);
+    if (m1 && m1[1]) { return m1[1].trim(); }
+    const reRaw = /^\s*Chapter\s+[^:]{1,80}:\s*([^\n<]{1,160})/i;
+    const m2 = s.match(reRaw);
+    if (m2 && m2[1]) { return m2[1].trim(); }
+    return null;
+  }
   return (
     <Card className="bg-amber-50/80 border-amber-300">
       <CardHeader className="flex justify-between">
@@ -58,10 +85,18 @@ export function Reader({ outline, chapters, scenes, influence, setInfluence, onN
             <div className="text-amber-900/70 uppercase text-xs">Story so far</div>
             {scenes.map((sc, idx)=>(
               <div key={idx} className="rounded-2xl border border-amber-200 bg-white/70 p-4">
-                <div className={`font-serif ${headingScale} mb-2`}>Chapter {sc.chapterId}: {sc.chapterHeading}</div>
+                <div className={`font-serif ${headingScale} mb-2 whitespace-normal break-words`}>
+                  {(() => {
+                    const derived = extractChapterTitleFromHtml(sc.html);
+                    const heading = sc.chapterHeading || "";
+                    if (derived && derived.trim()) { return <>Chapter {sc.chapterId}: {derived}</>; }
+                    if (/^\s*chapter\s+/i.test(heading)) { return <>{heading}</>; }
+                    return <>Chapter {sc.chapterId}: {heading}</>;
+                  })()}
+                </div>
                 {sc.imageUrl && <img src={sc.imageUrl} alt="Scene" className="w-full h-auto rounded-lg border border-amber-200 mb-3" onError={()=> onSceneImageBroken && onSceneImageBroken(idx)} />}
                 {/* eslint-disable-next-line react/no-danger */}
-                <div className={`${proseScale} prose-amber max-w-none`} dangerouslySetInnerHTML={{ __html: sc.html }} />
+                <div className={`${proseScale} prose-amber max-w-none`} dangerouslySetInnerHTML={{ __html: stripLeadingChapterLabel(stripFirstHeadingTag(sc.html)) }} />
               </div>
             ))}
           </div>

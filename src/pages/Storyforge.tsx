@@ -6,7 +6,7 @@ import { CoverCard } from "../components/CoverCard";
 import { SeedForm } from "../components/SeedForm";
 import { Reader } from "../components/Reader";
 import { parseTOC, buildCoverPromptFromTOC, ChapterItem } from "../lib/parse";
-import { seedStory, expandChapter, genImage, exportBook, BASE, primeStory, PrimeInfo, regenerateSessionId } from "../services/n8n";
+import { seedStory, expandChapter, genImage, exportBook, exportStoryPackage, BASE, primeStory, PrimeInfo, regenerateSessionId } from "../services/n8n";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { normalizeAgeRange, chapterRangeForAgeRange } from "../lib/age";
@@ -38,6 +38,7 @@ export default function StoryforgePage(){
   const [premise, setPremise] = useState(idea || "");
   const [ageRange, setAgeRange] = useState(normalizeAgeRange("6-8"));
   const [genre, setGenre] = useState("fantasy");
+  const [chapterLength, setChapterLength] = useState("short");
   const [chaptersTarget, setChaptersTarget] = useState(8);
   const [keypoints, setKeypoints] = useState("");
   const [style, setStyle] = useState("warm, whimsical, gentle-humor");
@@ -77,7 +78,7 @@ export default function StoryforgePage(){
     try{
       // Fresh cognitive seed: renew session so downstream outline/chapters bind to this arc
       regenerateSessionId();
-      const payload = { title, premise, ageRange: normalizeAgeRange(ageRange), genre, chaptersTarget, keypoints, style, coverUrl };
+      const payload = { title, premise, ageRange: normalizeAgeRange(ageRange), genre, chapterLength, chaptersTarget, keypoints, style, coverUrl };
       try {
         const raw = window.localStorage.getItem(STORAGE_KEY);
         const data = raw ? JSON.parse(raw) : {};
@@ -97,7 +98,7 @@ export default function StoryforgePage(){
       setLoading(true); setError(null);
       const normAge = normalizeAgeRange(ageRange);
       const lengthHint = chapterRangeForAgeRange(normAge);
-      const context = { title: title || "Untitled Codex", toc, priorHtml: scenes.map(s=>s.html), keypoints, genre, ageRange: normAge, lengthHint, style };
+      const context = { title: title || "Untitled Codex", premise, toc, priorHtml: scenes.map(s=>s.html), keypoints, genre, ageRange: normAge, lengthHint, style, chapterLength };
       const influenceBracket = `[context: genre=${genre}; age=${normAge}; style=${style}; notes=${(keypoints||"").slice(0,120)}]`;
       const combinedInfluence = (influence && influence.trim()) ? `${influenceBracket} ${influence.trim()}` : influenceBracket;
       const { html } = await expandChapter({ context, chapterIndex: idx, influence: combinedInfluence });
@@ -116,7 +117,10 @@ export default function StoryforgePage(){
         const img = s.imageUrl ? `<img src="${s.imageUrl}" alt="Scene for Chapter ${s.chapterId}: ${s.chapterHeading}" style="max-width:100%;height:auto;border:1px solid #e2c084;border-radius:12px;margin:12px 0;"/>` : "";
         return `${img}\n${s.html}`;
       });
-      const { downloadUrl, filename } = await exportBook({ htmlPages: htmlPagesWithImages, coverUrl, meta: { title, toc, chapters } });
+      const fullPackage = { htmlPages: htmlPagesWithImages, coverUrl, meta: { title, toc, chapters }, scenes } as any;
+      // Fire-and-forget server archive; don't block UI on errors
+      try { exportStoryPackage(fullPackage); } catch {}
+      const { downloadUrl, filename } = await exportBook(fullPackage);
       if (downloadUrl)
       {
         const a = document.createElement("a");
@@ -153,6 +157,7 @@ export default function StoryforgePage(){
         setPremise(idea);
         setAgeRange(normalizeAgeRange(data.ageRange || "6-8"));
         setGenre(data.genre || "fantasy");
+        setChapterLength(data.chapterLength || "medium");
         setChaptersTarget(typeof data.chaptersTarget === 'number' ? data.chaptersTarget : 8);
         // New cognitive seed: purge prior salience notes to avoid leakage into a new narrative
         setKeypoints("");
@@ -177,6 +182,7 @@ export default function StoryforgePage(){
         setPremise(idea || cachedPremise || "");
         setAgeRange(normalizeAgeRange(data.ageRange || "6-8"));
         setGenre(data.genre || "fantasy");
+        setChapterLength(data.chapterLength || "medium");
         setChaptersTarget(typeof data.chaptersTarget === 'number' ? data.chaptersTarget : 8);
         // If a fresh idea is present, start with empty keypoints to prevent priming carry-over
         setKeypoints(idea ? "" : (data.keypoints || ""));
@@ -239,7 +245,7 @@ export default function StoryforgePage(){
   useEffect(()=>{
     if (typeof window === 'undefined') return;
     const payload = {
-      title, premise, ageRange: normalizeAgeRange(ageRange), genre, chaptersTarget, keypoints, style,
+      title, premise, ageRange: normalizeAgeRange(ageRange), genre, chapterLength, chaptersTarget, keypoints, style,
       toc, chapters, coverUrl, scenes
     };
     try{ window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload)); } catch {}
@@ -271,6 +277,12 @@ export default function StoryforgePage(){
               if (info.ageRange) setAgeRange(normalizeAgeRange(info.ageRange));
               if (info.genre) setGenre(info.genre);
               if (typeof info.chapters === 'number') setChaptersTarget(info.chapters);
+              if (info.chapterLength)
+              {
+                const len = (info.chapterLength || '').toString().toLowerCase();
+                const allowed = ['tiny','short','medium','long'];
+                if (allowed.includes(len)) { setChapterLength(len); }
+              }
               if (info.keypoints) setKeypoints(info.keypoints);
               if (info.style) setStyle(info.style);
             }
@@ -329,8 +341,8 @@ export default function StoryforgePage(){
         <div className="mt-0 grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2">
             <SeedForm
-              state={{ title, premise, ageRange, genre, chapters: chaptersTarget, keypoints, style, loading, status, error, baseLabel: (BASE.replace("https://","")) }}
-              actions={{ setTitle: onChangeTitle, setPremise: onChangePremise, setAgeRange, setGenre, setChapters: setChaptersTarget, setKeypoints, setStyle, onSeed, onPrime: async ()=>{
+              state={{ title, premise, ageRange, genre, chapterLength, chapters: chaptersTarget, keypoints, style, loading, status, error, baseLabel: (BASE.replace("https://","")) }}
+              actions={{ setTitle: onChangeTitle, setPremise: onChangePremise, setAgeRange, setGenre, setChapterLength, setChapters: setChaptersTarget, setKeypoints, setStyle, onSeed, onPrime: async ()=>{
                 try{
                   setLoading(true); setStatus("Fetching seed info…"); setError(null);
                   const { info } = await primeStory({ prompt: idea || premise });
@@ -345,6 +357,12 @@ export default function StoryforgePage(){
                     if (info.ageRange) setAgeRange(normalizeAgeRange(info.ageRange));
                     if (info.genre) setGenre(info.genre);
                     if (typeof info.chapters === 'number') setChaptersTarget(info.chapters);
+                    if (info.chapterLength)
+                    {
+                      const len = (info.chapterLength || '').toString().toLowerCase();
+                      const allowed = ['tiny','short','medium','long'];
+                      if (allowed.includes(len)) { setChapterLength(len); }
+                    }
                     if (info.keypoints) setKeypoints(info.keypoints);
                     if (info.style) setStyle(info.style);
                     const coverPrompt = buildCoverPromptFromTOC(info.title || title || "Untitled Codex", (info.description || premise || "").split("\n").slice(0,2).join("\n"));

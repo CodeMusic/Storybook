@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { CornerUpLeft, Loader2, Play, Pause } from "lucide-react";
 import { expandChapter, expandChapterStream, genImage, exportBook, voiceforge } from "../services/n8n";
@@ -20,8 +20,10 @@ export default function ReadPage()
   const [error, setError] = useState<string | null>(null);
   const [ageRange, setAgeRange] = useState<string>(normalizeAgeRange("6-8"));
   const [genre, setGenre] = useState<string>("fantasy");
+  const [chapterLength, setChapterLength] = useState<string>("short");
   const [keypoints, setKeypoints] = useState<string>("");
   const [style, setStyle] = useState<string>("warm, whimsical, gentle-humor");
+  const [premise, setPremise] = useState<string>("");
   const proseScale = proseScaleClassForAgeRange(ageRange);
   const headingScale = headingSizeClassForAgeRange(ageRange);
 
@@ -40,6 +42,10 @@ export default function ReadPage()
   const [isSynthLoading, setIsSynthLoading] = useState<boolean>(false);
   const [needsGesture, setNeedsGesture] = useState<boolean>(false);
   const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null);
+  const [audioReady, setAudioReady] = useState<boolean>(false);
+  const [pendingUserPlay, setPendingUserPlay] = useState<boolean>(false);
+  const [audioRequested, setAudioRequested] = useState<boolean>(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Incremental markdown renderer that coexists with HTML
   function escapeHtml(unsafe: string): string
@@ -77,15 +83,53 @@ export default function ReadPage()
     return html;
   }
 
+  // Remove a leading heading tag to avoid duplicate titles (cognitive dissonance prevention)
+  function stripFirstHeadingTag(html: string): string
+  {
+    if (!html || !html.trim()) { return html; }
+    // Preserve an optional leading wrapper like words-flash, but drop the first <h1>-<h6>
+    const re = /^\s*((?:<div[^>]*class="[^"]*words-flash[^"]*"[^>]*>\s*)?)(<h[1-6][^>]*>[\s\S]*?<\/h[1-6]>\s*)/i;
+    return html.replace(re, (_m, prefix) => `${prefix}`);
+  }
+
+  // Remove a leading textual chapter label like: "Chapter Five: Title ..." → "Title ..."
+  function stripLeadingChapterLabel(html: string): string
+  {
+    if (!html || !html.trim()) { return html; }
+    // Match optional words-flash wrapper, optional opening paragraph, then Chapter ...: prefix
+    const rePara = /^\s*((?:<div[^>]*class="[^"]*words-flash[^"]*"[^>]*>\s*)?(?:<p[^>]*>\s*)?)\s*Chapter\s+[^:]{1,80}:\s*/i;
+    const withoutParaPrefix = html.replace(rePara, (_m, prefix) => `${prefix}`);
+    if (withoutParaPrefix !== html) { return withoutParaPrefix; }
+    // Fallback: handle raw text without <p>
+    const reRaw = /^\s*Chapter\s+[^:]{1,80}:\s*/i;
+    return html.replace(reRaw, "");
+  }
+
+  // Extract a title from a leading pattern like "Chapter Five: The Escape" in the first heading/paragraph
+  function extractChapterTitleFromHtml(html: string): string | null
+  {
+    if (!html || !html.trim()) { return null; }
+    const s = html.toString();
+    // Try matching inside an <h1-6> or <p> first
+    const reTag = /^\s*(?:<div[^>]*class="[^"]*words-flash[^"]*"[^>]*>\s*)?(?:<h[1-6][^>]*>|<p[^>]*>)\s*Chapter\s+[^:]{1,80}:\s*([^<\n]{1,160})/i;
+    const m1 = s.match(reTag);
+    if (m1 && m1[1]) { return m1[1].trim(); }
+    // Fallback: raw text at beginning
+    const reRaw = /^\s*Chapter\s+[^:]{1,80}:\s*([^\n<]{1,160})/i;
+    const m2 = s.match(reRaw);
+    if (m2 && m2[1]) { return m2[1].trim(); }
+    return null;
+  }
+
   function renderStreaming(raw: string): string
   {
     const text = decodeEntities((raw || "").toString());
     if (!text.trim()) { return ""; }
     if (/[<][a-zA-Z!\/?]/.test(text))
     {
-      return coerceHTMLString(text);
+      return stripLeadingChapterLabel(stripFirstHeadingTag(coerceHTMLString(text)));
     }
-    return markdownToHtmlIncremental(text);
+    return stripLeadingChapterLabel(stripFirstHeadingTag(markdownToHtmlIncremental(text)));
   }
 
   // Decode common HTML entities (handles &quot; in streamed JSON)
@@ -242,8 +286,10 @@ export default function ReadPage()
         setCoverUrl(data.coverUrl || null);
         setAgeRange(normalizeAgeRange(data.ageRange || "6-8"));
         setGenre(data.genre || "fantasy");
+        setChapterLength(data.chapterLength || "short");
         setKeypoints(data.keypoints || "");
         setStyle(data.style || "warm, whimsical, gentle-humor");
+        setPremise(data.premise || "");
         const loadedScenes = Array.isArray(data.scenes) ? data.scenes : [];
         // Coerce any legacy/plain scenes into HTML and persist fix
         const coerced = loadedScenes.map((s: any) => ({
@@ -312,7 +358,7 @@ export default function ReadPage()
       setLoading(true); setError(null);
       const normAge = normalizeAgeRange(ageRange);
       const lengthHint = chapterRangeForAgeRange(normAge);
-      const context = { title, toc, priorHtml: scenes.map(s=>s.html), ageRange: normAge, lengthHint, genre, keypoints, style };
+      const context = { title, premise, toc, priorHtml: scenes.map(s=>s.html), ageRange: normAge, lengthHint, genre, keypoints, style, chapterLength };
       const influenceBracket = `[context: genre=${genre}; age=${normAge}; style=${style}; notes=${(keypoints||"").slice(0,120)}]`;
 
       // Prepare streaming UI state
@@ -376,7 +422,7 @@ export default function ReadPage()
         const plainText = htmlNow.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
         const totalWords = plainText ? plainText.split(' ').length : 0;
         const newly = Math.max(0, totalWords - prevWordCount);
-        const wrapped = wrapWords(htmlNow, newly, { skipFirstWord: true });
+        const wrapped = wrapWords(htmlNow, newly, { skipFirstWord: false });
         prevWordCount = totalWords;
         setStreamingHtml(wrapped);
         // Snapshot progress so we can recover from refresh
@@ -392,7 +438,7 @@ export default function ReadPage()
       const finalHtml = (()=>{
         const htmlNow = renderStreaming(rawText);
         // Flash all words briefly
-        return `<div class="words-flash">${wrapWords(htmlNow, 0, { skipFirstWord: true })}<\/div>`;
+        return `<div class="words-flash">${wrapWords(htmlNow, 0, { skipFirstWord: false })}<\/div>`;
       })();
       const finalImageUrl = resolvedImageUrlEarly || streamingImageUrl;
       const next = [...scenes, { chapterId: chapterMeta.id, chapterHeading: chapterMeta.heading, html: finalHtml, imageUrl: finalImageUrl }];
@@ -459,7 +505,33 @@ export default function ReadPage()
     return "";
   }, [activeScene?.html, isStreaming, streamingHtml]);
 
+  // Compute a display heading: prefer a title extracted from content; avoid duplicated "Chapter" prefixes
+  const displayChapterHeading = useMemo(() =>
+  {
+    const htmlSource = isStreaming ? streamingHtml : (activeScene?.html || "");
+    const derived = extractChapterTitleFromHtml(htmlSource);
+    const fallback = activeScene ? activeScene.chapterHeading : streamingChapterHeading;
+    if (derived && derived.trim()) { return derived.trim(); }
+    if ((fallback || "").trim().toLowerCase().startsWith("chapter "))
+    {
+      // Show just the fallback (e.g., "Chapter Five") without numeric prefix to avoid duplication
+      return fallback || "";
+    }
+    return fallback || "";
+  }, [activeScene, streamingChapterHeading, isStreaming, streamingHtml]);
+
   const [turning, setTurning] = useState<boolean>(false);
+
+  // Initialize and keep a DOM <audio> element with the right attributes
+  useEffect(() => {
+    const el = audioRef.current;
+    if (!el) { return; }
+    try { (el as any).crossOrigin = 'anonymous'; } catch {}
+    try { el.setAttribute('playsinline', ''); el.setAttribute('webkit-playsinline', ''); } catch {}
+    el.preload = 'auto';
+    el.onended = () => setIsPlaying(false);
+    setAudioEl(el);
+  }, []);
 
   // Cleanup audio on unmount or chapter change
   useEffect(() => {
@@ -473,9 +545,59 @@ export default function ReadPage()
       setAudioEl(null);
       setAudioUrl(null);
       setIsPlaying(false);
+      setAudioReady(false);
+      setPendingUserPlay(false);
+      setAudioRequested(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeIdx]);
+
+  async function prepareAudio(autoPlay: boolean)
+  {
+    const el = audioRef.current;
+    setAudioReady(false);
+    setNeedsGesture(false);
+    if (!el) { return; }
+    try { el.pause(); } catch {}
+    try { el.removeAttribute('src'); } catch {}
+    try { el.load(); } catch {}
+    if (!activeScene || !activeScene.html) { setAudioUrl(null); return; }
+    try
+    {
+      setIsSynthLoading(true);
+      const plain = (activeScene.html || "").replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const { url } = await voiceforge(plain);
+      setAudioUrl(url);
+      el.src = url;
+      const onCanPlayThrough = async () =>
+      {
+        setAudioReady(true);
+        if (autoPlay || pendingUserPlay)
+        {
+          try { await el.play(); setIsPlaying(true); setNeedsGesture(false); setPendingUserPlay(false); }
+          catch { setNeedsGesture(true); }
+        }
+      };
+      el.addEventListener('canplaythrough', onCanPlayThrough, { once: true } as any);
+      try { el.load(); } catch {}
+    }
+    catch (e: any)
+    {
+      setError(e?.message || 'Audio failed');
+    }
+    finally
+    {
+      setIsSynthLoading(false);
+    }
+  }
+
+  async function handleSpeak()
+  {
+    if (isSynthLoading) { return; }
+    setAudioRequested(true);
+    setPendingUserPlay(true);
+    await prepareAudio(true);
+  }
 
   // Toggle play/pause; synthesize audio if needed
   async function handlePlayPause()
@@ -483,7 +605,18 @@ export default function ReadPage()
     try
     {
       if (!activeScene || !activeScene.html) { return; }
-      if (isSynthLoading) { return; }
+      // First interaction: request audio synthesis on demand
+      if (!audioRequested)
+      {
+        await handleSpeak();
+        return;
+      }
+      // If audio is still preparing, remember the user's intent
+      if (isSynthLoading && audioEl)
+      {
+        setPendingUserPlay(true);
+        return;
+      }
 
       // Try to unlock audio on iOS/Safari by resuming an AudioContext in a user gesture
       try
@@ -497,8 +630,8 @@ export default function ReadPage()
         }
       } catch {}
 
-      // If we already have audio and an element, just toggle
-      if (audioEl && audioUrl)
+      // If we already have audio and an element, just toggle or request play
+      if (audioEl)
       {
         if (isPlaying)
         {
@@ -507,33 +640,32 @@ export default function ReadPage()
         }
         else
         {
-          try { await audioEl.play(); setIsPlaying(true); setNeedsGesture(false); }
-          catch { setNeedsGesture(true); }
+          if (audioReady)
+          {
+            try { await audioEl.play(); setIsPlaying(true); setNeedsGesture(false); }
+            catch { setNeedsGesture(true); }
+          }
+          else
+          {
+            setPendingUserPlay(true);
+            try { await audioEl.play(); setIsPlaying(true); setNeedsGesture(false); }
+            catch { setNeedsGesture(true); }
+          }
         }
         return;
       }
-
-      setIsSynthLoading(true);
-      // Extract plain text from the chapter HTML for TTS prompt
-      const plain = (activeScene.html || "").replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-      const { url } = await voiceforge(plain);
-      setAudioUrl(url);
-      const el = new Audio();
-      el.preload = 'auto';
-      try { (el as any).crossOrigin = 'anonymous'; } catch {}
-      el.src = url;
-      el.onended = () => setIsPlaying(false);
-      setAudioEl(el);
-      try { await el.play(); setIsPlaying(true); setNeedsGesture(false); }
-      catch { setNeedsGesture(true); setIsPlaying(false); }
+      // Fallback: if for some reason the DOM audio isn't ready, bind it now
+      if (audioRef.current)
+      {
+        setAudioEl(audioRef.current);
+        setPendingUserPlay(true);
+        try { await audioRef.current.play(); setIsPlaying(true); setNeedsGesture(false); }
+        catch { setNeedsGesture(true); setIsPlaying(false); }
+      }
     }
     catch (e: any)
     {
       setError(e?.message || 'Audio failed');
-    }
-    finally
-    {
-      setIsSynthLoading(false);
     }
   }
 
@@ -555,7 +687,7 @@ export default function ReadPage()
           <button onClick={()=>router.push('/Outline')} className="inline-flex items-center gap-2 text-amber-900 hover:underline">
             <CornerUpLeft className="h-4 w-4" /> Back to outline
           </button>
-          <h1 className="mt-2 text-2xl font-story-title">{title || "StoryForge"}</h1>
+          <h1 className="mt-2 text-2xl font-story-title whitespace-normal break-words">{title || "StoryForge"}</h1>
         </div>
       </header>
       <main className="mx-auto max-w-3xl px-4 pb-32">
@@ -571,8 +703,10 @@ export default function ReadPage()
           {error && <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-red-800">{error}</div>}
           {(activeScene || isStreaming) && (
             <div>
-              <div className={`font-story-title ${headingScale} mb-2 text-amber-900` }>
-                Chapter {activeScene ? activeScene.chapterId : streamingChapterId}: {activeScene ? activeScene.chapterHeading : streamingChapterHeading}
+              <div className={`font-story-title ${headingScale} mb-2 text-amber-900 whitespace-normal break-words` }>
+                {displayChapterHeading && !/^\s*chapter\s+/i.test(displayChapterHeading)
+                  ? <>Chapter {activeScene ? activeScene.chapterId : streamingChapterId}: {displayChapterHeading}</>
+                  : <>{displayChapterHeading || `Chapter ${activeScene ? activeScene.chapterId : streamingChapterId}`}</>}
               </div>
               {(activeScene?.imageUrl || streamingImageUrl) && (
                 <>
@@ -580,13 +714,23 @@ export default function ReadPage()
                   {!!activeScene && !isStreaming && (
                     <div className="flex justify-end mb-3">
                       <button
-                        onClick={handlePlayPause}
+                        onClick={audioRequested ? handlePlayPause : handleSpeak}
                         disabled={isSynthLoading}
                         className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm"
-                        aria-label={isPlaying ? 'Pause narration' : 'Play narration'}
+                        aria-label={(!audioRequested) ? 'Speak narration' : (isPlaying ? 'Pause narration' : 'Play narration')}
                       >
-                        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                        <span className="text-xs">{isPlaying ? 'Pause' : (isSynthLoading ? 'Preparing…' : 'Play')}</span>
+                        <span className="relative inline-flex h-4 w-4 items-center justify-center">
+                          {isSynthLoading && (
+                            <>
+                              <span className="absolute -inset-1 rounded-full bg-amber-400/50 blur-md animate-ping" aria-hidden="true" />
+                              <span className="absolute inset-0 rounded-full bg-amber-500/40 blur-sm animate-pulse" aria-hidden="true" />
+                            </>
+                          )}
+                          {isPlaying
+                            ? <Pause className={`h-4 w-4 relative ${isSynthLoading ? 'drop-shadow-[0_0_6px_rgba(245,158,11,0.9)]' : ''}`} />
+                            : <Play className={`h-4 w-4 relative ${isSynthLoading ? 'drop-shadow-[0_0_6px_rgba(245,158,11,0.9)]' : ''}`} />}
+                        </span>
+                        <span className="text-xs">{!audioRequested ? (isSynthLoading ? 'Preparing…' : 'Speak') : (isPlaying ? 'Pause' : (isSynthLoading ? 'Preparing…' : 'Play'))}</span>
                       </button>
                     </div>
                   )}
@@ -596,22 +740,34 @@ export default function ReadPage()
               {!activeScene?.imageUrl && !!activeScene && !isStreaming && (
                 <div className="flex justify-end mb-3">
                   <button
-                    onClick={handlePlayPause}
+                    onClick={audioRequested ? handlePlayPause : handleSpeak}
                     disabled={isSynthLoading}
                     className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm"
-                    aria-label={isPlaying ? 'Pause narration' : 'Play narration'}
+                    aria-label={(!audioRequested) ? 'Speak narration' : (isPlaying ? 'Pause narration' : 'Play narration')}
                   >
-                    {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                    <span className="text-xs">{isPlaying ? 'Pause' : (isSynthLoading ? 'Preparing…' : 'Play')}</span>
+                    <span className="relative inline-flex h-4 w-4 items-center justify-center">
+                      {isSynthLoading && (
+                        <>
+                          <span className="absolute -inset-1 rounded-full bg-amber-400/50 blur-md animate-ping" aria-hidden="true" />
+                          <span className="absolute inset-0 rounded-full bg-amber-500/40 blur-sm animate-pulse" aria-hidden="true" />
+                        </>
+                      )}
+                      {isPlaying
+                        ? <Pause className={`h-4 w-4 relative ${isSynthLoading ? 'drop-shadow-[0_0_6px_rgba(245,158,11,0.9)]' : ''}`} />
+                        : <Play className={`h-4 w-4 relative ${isSynthLoading ? 'drop-shadow-[0_0_6px_rgba(245,158,11,0.9)]' : ''}`} />}
+                    </span>
+                    <span className="text-xs">{!audioRequested ? (isSynthLoading ? 'Preparing…' : 'Speak') : (isPlaying ? 'Pause' : (isSynthLoading ? 'Preparing…' : 'Play'))}</span>
                   </button>
                 </div>
               )}
               {/* eslint-disable-next-line react/no-danger */}
-              <div className={`${proseScale} prose-amber prose-story dropcap font-story-body max-w-none ${isStreaming ? 'story-hit' : ''}`} dangerouslySetInnerHTML={{ __html: displayHtml }} />
+              <div className={`${proseScale} prose-amber prose-story dropcap font-story-body max-w-none ${isStreaming ? 'story-hit' : ''}`} dangerouslySetInnerHTML={{ __html: stripLeadingChapterLabel(stripFirstHeadingTag(displayHtml)) }} />
             </div>
           )}
         </div>
       </main>
+      {/* Hidden DOM audio element for iOS/Safari reliability */}
+      <audio ref={audioRef} style={{ display: 'none' }} />
       {/* Bottom navigation for chapter flow */}
       {!loading && (
         <div className="fixed bottom-0 left-0 right-0 z-20">

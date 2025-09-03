@@ -10,6 +10,7 @@ export const ENDPOINTS = {
   image: `${BASE}/genImage`,        // → string image URL
   export: `${BASE}/exportBook`,     // → string download URL
   voice: `${BASE}/voiceforge`,      // → audio bytes or URL
+  exportStory: `${BASE}/exportStory`, // → accept full package JSON
 };
 
 function basicAuthHeader(): string {
@@ -650,16 +651,94 @@ export async function exportBook(book: { htmlPages?:string[]; scenes?: { chapter
   }
 }
 
+// Send full package to server for archival/export
+export async function exportStoryPackage(book: { htmlPages?:string[]; scenes?: { chapterId:number; chapterHeading:string; html:string; imageUrl?:string|null }[]; coverUrl?:string|null; meta:any }): Promise<void>
+{
+  try
+  {
+    // Normalize payload shape
+    const title = (book?.meta?.title || "Untitled Codex").toString();
+    const payload = {
+      title,
+      toc: book?.meta?.toc ?? null,
+      chapters: Array.isArray(book?.meta?.chapters) ? book.meta.chapters : [],
+      scenes: Array.isArray(book?.scenes) ? book.scenes : [],
+      coverUrl: book?.coverUrl ?? null,
+      htmlPages: Array.isArray(book?.htmlPages) ? book.htmlPages : undefined,
+      exportedAt: new Date().toISOString(),
+    };
+    await fetchWithTimeout(ENDPOINTS.exportStory, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": basicAuthHeader(),
+      },
+      body: JSON.stringify(withSession(payload))
+    }).then(()=>{}).catch(()=>{});
+  }
+  catch
+  {
+    // Best-effort; ignore errors to not block client export UX
+  }
+}
+
 export type PrimeInfo = {
   title?: string;
   description?: string;
   ageRange?: string;
   genre?: string;
   chapters?: number;
+  chapterLength?: string;
   keypoints?: string;
   style?: string;
   toc?: string;
 };
+
+// Attempt to parse tuple-style outputs like: ({ ... }),({ ... }), and return the first viable object
+function parsePrimeTupleString(raw: string): PrimeInfo | null
+{
+  const s = (raw || "").toString().trim();
+  if (!s)
+  {
+    return null;
+  }
+  // Extract JSON objects wrapped in parentheses, optionally comma-separated
+  // Example: ( {"title":"..."} ),( {"title":"..."} ),
+  const re = /\(\s*({[\s\S]*?})\s*\)\s*,?/g;
+  const candidates: any[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null)
+  {
+    const jsonCandidate = (m[1] || "").trim();
+    try
+    {
+      const obj = JSON.parse(jsonCandidate);
+      if (obj && typeof obj === 'object')
+      {
+        candidates.push(obj);
+      }
+    }
+    catch {}
+  }
+  if (!candidates.length)
+  {
+    return null;
+  }
+  // Map the first candidate to PrimeInfo shape
+  const first = candidates[0] || {};
+  const info: PrimeInfo = {
+    title: first.title,
+    description: first.description,
+    ageRange: first.ageRange,
+    genre: first.genre,
+    chapters: typeof first.chapters === 'number' ? first.chapters : (parseInt(String(first.chapters || ''), 10) || undefined),
+    chapterLength: first.chapterLength,
+    keypoints: first.keypoints,
+    style: first.style,
+  };
+  const hasSignal = Object.values(info).some(v => v !== undefined && v !== null && v !== "");
+  return hasSignal ? info : null;
+}
 
 export async function primeStory(input: { prompt?: string; premise?: string }): Promise<{ info: PrimeInfo }>
 {
@@ -670,6 +749,12 @@ export async function primeStory(input: { prompt?: string; premise?: string }): 
     // Helper to parse an output string into PrimeInfo (handles fences and parentheses)
     const parseOutputString = (outStr: string): PrimeInfo => {
       const out = (outStr || '').trim();
+      // First, attempt tuple-style parsing like: ({ ... }),({ ... }),
+      const tuple = parsePrimeTupleString(out);
+      if (tuple)
+      {
+        return tuple;
+      }
       // Extract fenced code if present
       const fenceMatch = out.match(/```\s*json\s*([\s\S]*?)```/i) || out.match(/```\s*([\s\S]*?)```/i);
       let jsonCandidate = (fenceMatch ? fenceMatch[1] : out).trim();
@@ -685,6 +770,7 @@ export async function primeStory(input: { prompt?: string; premise?: string }): 
             ageRange: parsed.ageRange,
             genre: parsed.genre,
             chapters: parsed.chapters,
+            chapterLength: parsed.chapterLength,
             keypoints: parsed.keypoints,
             style: parsed.style,
           };
@@ -723,6 +809,12 @@ export async function primeStory(input: { prompt?: string; premise?: string }): 
     try {
       const raw = await postForRaw(ENDPOINTS.prime, input);
       const desc = (raw || "").toString().trim();
+      // Attempt to parse tuple-style "({ ... }),({ ... })," first
+      const tupleInfo = parsePrimeTupleString(desc);
+      if (tupleInfo)
+      {
+        return { info: tupleInfo };
+      }
       return { info: desc ? { description: desc } : {} };
     } catch (e) {
       throw e;

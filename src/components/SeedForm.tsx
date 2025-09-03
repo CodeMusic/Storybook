@@ -6,11 +6,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { ShieldCheck, Sparkles, RefreshCw, Play } from "lucide-react";
 
 export function SeedForm({ state, actions }:{
-  state:{ title:string; premise:string; ageRange:string; genre:string; chapters:number; keypoints:string; style:string; loading:boolean; status?:string; error:string|null; baseLabel:string };
-  actions:{ setTitle:(s:string)=>void; setPremise:(s:string)=>void; setAgeRange:(s:string)=>void; setGenre:(s:string)=>void; setChapters:(n:number)=>void; setKeypoints:(s:string)=>void; setStyle:(s:string)=>void; onSeed:()=>void; onPrime?:()=>void };
+  state:{ title:string; premise:string; ageRange:string; genre:string; chapterLength:string; chapters:number; keypoints:string; style:string; loading:boolean; status?:string; error:string|null; baseLabel:string };
+  actions:{ setTitle:(s:string)=>void; setPremise:(s:string)=>void; setAgeRange:(s:string)=>void; setGenre:(s:string)=>void; setChapterLength:(s:string)=>void; setChapters:(n:number)=>void; setKeypoints:(s:string)=>void; setStyle:(s:string)=>void; onSeed:()=>void; onPrime?:()=>void };
 }){
-  const { title, premise, ageRange, genre, chapters, keypoints, style, loading, status, error, baseLabel } = state;
-  const { setTitle, setPremise, setAgeRange, setGenre, setChapters, setKeypoints, setStyle, onSeed, onPrime } = actions;
+  const { title, premise, ageRange, genre, chapterLength, chapters, keypoints, style, loading, status, error, baseLabel } = state;
+  const { setTitle, setPremise, setAgeRange, setGenre, setChapterLength, setChapters, setKeypoints, setStyle, onSeed, onPrime } = actions;
   // Ensure UI can represent any returned age range (e.g., "6-8")
   const canonicalAgeRanges = ["1-3", "4-8", "6-8", "9-15", "16-20", "21-25", "25+"];
   const ageRangeOptions = canonicalAgeRanges.includes(ageRange) ? canonicalAgeRanges : [ageRange, ...canonicalAgeRanges];
@@ -59,6 +59,12 @@ export function SeedForm({ state, actions }:{
   const genreOptions = genreArchetypes.some(g => g.value === genre)
     ? genreArchetypes
     : [{ value: genre, label: genre.replace(/-/g, " ").replace(/\b\w/g, c => c.toUpperCase()) }, ...genreArchetypes];
+  const lengthOptions: { value: string; label: string }[] = [
+    { value: "tiny", label: "Tiny" },
+    { value: "short", label: "Short" },
+    { value: "medium", label: "Medium" },
+    { value: "long", label: "Long" },
+  ];
   return (
     <Card className="relative backdrop-blur bg-amber-100/70 border-amber-300 shadow-xl rounded-2xl">
       <CardHeader className="flex justify-between">
@@ -103,7 +109,19 @@ export function SeedForm({ state, actions }:{
             </select>
           </div>
           <div>
-            <label className="text-xs uppercase tracking-wide text-amber-900/70">How many chapters?</label>
+            <label className="text-xs uppercase tracking-wide text-amber-900/70">Chapter Length</label>
+            <select
+              className="w-full rounded-lg border border-amber-300 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-amber-400"
+              value={chapterLength}
+              onChange={e=>setChapterLength(e.target.value)}
+            >
+              {lengthOptions.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs uppercase tracking-wide text-amber-900/70">Chapter Count?</label>
             <Input type="number" min={3} max={20} value={chapters} onChange={e=>setChapters(parseInt(e.target.value||"8"))} />
           </div>
           <div className="col-span-2">
