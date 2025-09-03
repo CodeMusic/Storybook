@@ -9,6 +9,7 @@ export const ENDPOINTS = {
   chapter: `${BASE}/expandChapter`, // → string HTML
   image: `${BASE}/genImage`,        // → string image URL
   export: `${BASE}/exportBook`,     // → string download URL
+  voice: `${BASE}/voiceforge`,      // → audio bytes or URL
 };
 
 function basicAuthHeader(): string {
@@ -474,6 +475,53 @@ async function postForImageUrl(url: string, payload: any): Promise<string>
 }
 
 export async function genImage(prompt: string){ return { url: await postForImageUrl(ENDPOINTS.image, { prompt }) }; }
+
+async function postForAudioUrl(url: string, payload: any): Promise<string>
+{
+  const res = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": basicAuthHeader(),
+    },
+    body: JSON.stringify(withSession(payload))
+  });
+  const contentType = res.headers.get("content-type") || "";
+  if (!res.ok)
+  {
+    const t = await res.text().catch(()=>"");
+    throw new Error(t || `Endpoint error ${res.status}`);
+  }
+  // If direct audio bytes
+  if (/^audio\//i.test(contentType))
+  {
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  }
+  // Otherwise try to parse structured response first
+  const text = await res.text();
+  try {
+    const obj = JSON.parse(text);
+    // Common patterns: { url }, { data, mime }
+    if (typeof obj?.url === 'string') { return obj.url; }
+    if (typeof obj?.data === 'string')
+    {
+      const guessedType = obj?.mime || obj?.type || 'audio/mpeg';
+      if (obj.data.startsWith('data:')) { return obj.data; }
+      return `data:${guessedType};base64,${obj.data}`;
+    }
+  } catch {}
+  // Fallback: assume plain URL string
+  const trimmed = text.trim();
+  if (!trimmed) { throw new Error("Empty response"); }
+  return trimmed;
+}
+
+export async function voiceforge(prompt: string): Promise<{ url: string }>
+{
+  const url = await postForAudioUrl(ENDPOINTS.voice, { prompt });
+  return { url };
+}
 export async function exportBook(book: { htmlPages?:string[]; scenes?: { chapterId:number; chapterHeading:string; html:string; imageUrl?:string|null }[]; coverUrl?:string|null; meta:any })
 {
   // Primary path: generate a standalone HTML file client-side from in-memory content
@@ -557,7 +605,7 @@ export async function exportBook(book: { htmlPages?:string[]; scenes?: { chapter
     .prose p { line-height: 1.85; margin: 10px 0; font-size: 1.05em; }
     .toc-list { margin: 8px 0 0 20px; }
     .toc-list li { margin: 6px 0; }
-    .chapter-title { margin-bottom: 8px; }
+    .chapter-title { margin-bottom: 8px; color:#7c2d12; font-size: 1.8rem; }
     /* Drop cap for first paragraph */
     .dropcap p:first-of-type::first-letter { float:left; font-family: 'IM Fell English', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif; font-size: 3.2rem; line-height: 1; padding-right: 0.22rem; padding-top: 0.12rem; font-weight: 700; color:#7c2d12; }
   </style>

@@ -16,6 +16,19 @@ html, body, #__next {
 .prose-story {
   font-size: 1.125rem; /* larger body text */
   line-height: 1.85;
+  /* Ensure Tailwind Typography doesn't override our storybook body font */
+  font-family: 'Crimson Text', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+
+/* Headings inside prose should keep the story title font and natural casing */
+.prose-story h1,
+.prose-story h2,
+.prose-story h3,
+.prose-story h4,
+.prose-story h5,
+.prose-story h6 {
+  font-family: 'IM Fell English', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  text-transform: none;
 }
 
 /* Drop cap first letter */
@@ -28,6 +41,28 @@ html, body, #__next {
   font-weight: 700;
   font-family: 'IM Fell English', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
   color: #7c2d12;
+}
+
+/* Ensure first letter applies even when text is wrapped into spans for streaming */
+.dropcap p:first-of-type > .word:first-child::first-letter,
+.dropcap p:first-of-type > span:first-child::first-letter {
+  float: left;
+  font-size: 3.25rem;
+  line-height: 1;
+  padding-right: 0.2rem;
+  padding-top: 0.1rem;
+  font-weight: 700;
+  font-family: 'IM Fell English', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  color: #7c2d12;
+}
+
+/* Counter Tailwind Typography defaults that can override our fonts */
+.prose :where(p):not(:where([class~="not-prose"] *)) {
+  font-family: 'Crimson Text', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+.prose :where(h1,h2,h3,h4,h5,h6):not(:where([class~="not-prose"] *)) {
+  font-family: 'IM Fell English', ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  text-transform: none;
 }
 
 /* Word landing animation */

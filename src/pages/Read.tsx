@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
-import { CornerUpLeft, Loader2 } from "lucide-react";
-import { expandChapter, expandChapterStream, genImage, exportBook } from "../services/n8n";
+import { CornerUpLeft, Loader2, Play, Pause } from "lucide-react";
+import { expandChapter, expandChapterStream, genImage, exportBook, voiceforge } from "../services/n8n";
 import { normalizeAgeRange, chapterRangeForAgeRange, proseScaleClassForAgeRange, headingSizeClassForAgeRange } from "../lib/age";
 
 export default function ReadPage()
@@ -33,20 +33,24 @@ export default function ReadPage()
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const STREAMING_KEY = "storyforge.streaming.v1";
 
+  // Audio state for chapter narration
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [isSynthLoading, setIsSynthLoading] = useState<boolean>(false);
+
   // Incremental markdown renderer that coexists with HTML
   function escapeHtml(unsafe: string): string
   {
     return unsafe
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+      .replace(/>/g, "&gt;");
   }
 
   function markdownToHtmlIncremental(src: string): string
   {
-    const original = (src || "");
+    const original = decodeEntities(src || "");
     if (!original.trim()) { return ""; }
     let s = escapeHtml(original);
     // Headings
@@ -73,7 +77,7 @@ export default function ReadPage()
 
   function renderStreaming(raw: string): string
   {
-    const text = (raw || "").toString();
+    const text = decodeEntities((raw || "").toString());
     if (!text.trim()) { return ""; }
     if (/[<][a-zA-Z!\/?]/.test(text))
     {
@@ -170,16 +174,15 @@ export default function ReadPage()
         if (typeof (obj as any).output === 'string') return coerceHTMLString((obj as any).output);
       }
     } catch {}
-    // If looks like HTML, use as-is
-    if (/[<][a-zA-Z!/?]/.test(text)) return text;
+    // If looks like HTML, use as-is (but decode entities once to handle &quot; inside attributes/text)
+    if (/[<][a-zA-Z!\/?]/.test(text)) return decodeEntities(text);
     // Fallback: paragraphs with <br/>
     const escapeHtml = (s: string) => s
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/\"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-    const blocks = text.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
+      .replace(/>/g, "&gt;");
+    const decoded = decodeEntities(text);
+    const blocks = decoded.split(/\n{2,}/).map(b => b.trim()).filter(Boolean);
     return blocks.map(b => `<p>${escapeHtml(b).replace(/\n/g, "<br/>")}</p>`).join("\n");
   }
 
@@ -317,12 +320,42 @@ export default function ReadPage()
       setStreamingHtml("");
       setStreamingImageUrl(null);
 
-      // 1) Generate image first; keep frost until text streaming begins
+      // 1) Generate image first; preload and wait briefly for onload before starting text stream
       let resolvedImageUrlEarly: string | null = null;
       try {
         const imgPrompt = `${title || "Untitled Codex"} (ages ${normAge}): Chapter ${chapterMeta.id} - ${chapterMeta.heading}. Genre ${genre}. Style ${style}.`;
         const img = await genImage(imgPrompt);
-        if (img?.url) { resolvedImageUrlEarly = img.url; setStreamingImageUrl(img.url); }
+        const url = img?.url || null;
+        if (url)
+        {
+          resolvedImageUrlEarly = url;
+          // Preload to ensure it paints promptly when we render
+          const preload = new Promise<void>((resolve) => {
+            try {
+              const im = new Image();
+              try { (im as any).decoding = 'async'; } catch {}
+              try { (im as any).loading = 'eager'; } catch {}
+              im.onload = () => resolve();
+              im.onerror = () => resolve();
+              im.src = url;
+            } catch { resolve(); }
+          });
+          // Hint the browser to prioritize this image fetch
+          try {
+            if (typeof document !== 'undefined')
+            {
+              const link = document.createElement('link');
+              link.rel = 'preload';
+              (link as any).as = 'image';
+              link.href = url;
+              document.head.appendChild(link);
+              setTimeout(()=>{ try { document.head.removeChild(link); } catch {} }, 15000);
+            }
+          } catch {}
+          // Do not block indefinitely; give it up to 4s
+          await Promise.race([preload, new Promise(res => setTimeout(res, 4000))]);
+          setStreamingImageUrl(url);
+        }
       } catch { resolvedImageUrlEarly = null; }
 
       // 2) Stream the chapter content and hide spinner on first chunk
@@ -408,7 +441,84 @@ export default function ReadPage()
     return chapters[nextIdx];
   }, [chapters, activeIdx]);
 
+  // Rendered HTML for chapter body
+  const displayHtml = useMemo(() =>
+  {
+    // Streaming: animate only newly added words
+    if (isStreaming)
+    {
+      return streamingHtml;
+    }
+    // Finalized chapters: DO NOT per-word wrap; keep static, but allow drop cap
+    if (activeScene?.html)
+    {
+      return activeScene.html;
+    }
+    return "";
+  }, [activeScene?.html, isStreaming, streamingHtml]);
+
   const [turning, setTurning] = useState<boolean>(false);
+
+  // Cleanup audio on unmount or chapter change
+  useEffect(() => {
+    return () => {
+      try {
+        if (audioEl) { audioEl.pause(); }
+      } catch {}
+      try {
+        if (audioUrl && audioUrl.startsWith('blob:')) { URL.revokeObjectURL(audioUrl); }
+      } catch {}
+      setAudioEl(null);
+      setAudioUrl(null);
+      setIsPlaying(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIdx]);
+
+  // Toggle play/pause; synthesize audio if needed
+  async function handlePlayPause()
+  {
+    try
+    {
+      if (!activeScene || !activeScene.html) { return; }
+      if (isSynthLoading) { return; }
+
+      // If we already have audio and an element, just toggle
+      if (audioEl && audioUrl)
+      {
+        if (isPlaying)
+        {
+          audioEl.pause();
+          setIsPlaying(false);
+        }
+        else
+        {
+          await audioEl.play();
+          setIsPlaying(true);
+        }
+        return;
+      }
+
+      setIsSynthLoading(true);
+      // Extract plain text from the chapter HTML for TTS prompt
+      const plain = (activeScene.html || "").replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+      const { url } = await voiceforge(plain);
+      setAudioUrl(url);
+      const el = new Audio(url);
+      el.onended = () => setIsPlaying(false);
+      setAudioEl(el);
+      await el.play();
+      setIsPlaying(true);
+    }
+    catch (e: any)
+    {
+      setError(e?.message || 'Audio failed');
+    }
+    finally
+    {
+      setIsSynthLoading(false);
+    }
+  }
 
   async function navigateWithTurn(nextQuery: any)
   {
@@ -444,14 +554,43 @@ export default function ReadPage()
           {error && <div className="rounded-xl border border-red-300 bg-red-50 p-3 text-red-800">{error}</div>}
           {(activeScene || isStreaming) && (
             <div>
-              <div className={`font-story-title ${headingScale} mb-2`}>
+              <div className={`font-story-title ${headingScale} mb-2 text-amber-900` }>
                 Chapter {activeScene ? activeScene.chapterId : streamingChapterId}: {activeScene ? activeScene.chapterHeading : streamingChapterHeading}
               </div>
               {(activeScene?.imageUrl || streamingImageUrl) && (
-                <img src={(activeScene?.imageUrl || streamingImageUrl) as string} alt="Scene" className="w-full h-auto rounded-lg border border-amber-200 mb-3" />
+                <>
+                  <img src={(activeScene?.imageUrl || streamingImageUrl) as string} alt="Scene" loading="eager" decoding="async" fetchPriority="high" className="w-full h-auto rounded-lg border border-amber-200 mb-2" />
+                  {!!activeScene && !isStreaming && (
+                    <div className="flex justify-end mb-3">
+                      <button
+                        onClick={handlePlayPause}
+                        disabled={isSynthLoading}
+                        className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm"
+                        aria-label={isPlaying ? 'Pause narration' : 'Play narration'}
+                      >
+                        {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                        <span className="text-xs">{isPlaying ? 'Pause' : (isSynthLoading ? 'Preparing…' : 'Play')}</span>
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+              {/* If no image was rendered, still provide the play button above the prose */}
+              {!activeScene?.imageUrl && !!activeScene && !isStreaming && (
+                <div className="flex justify-end mb-3">
+                  <button
+                    onClick={handlePlayPause}
+                    disabled={isSynthLoading}
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm"
+                    aria-label={isPlaying ? 'Pause narration' : 'Play narration'}
+                  >
+                    {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                    <span className="text-xs">{isPlaying ? 'Pause' : (isSynthLoading ? 'Preparing…' : 'Play')}</span>
+                  </button>
+                </div>
               )}
               {/* eslint-disable-next-line react/no-danger */}
-              <div className={`${proseScale} prose-amber prose-story dropcap max-w-none ${isStreaming ? 'story-hit' : ''}`} dangerouslySetInnerHTML={{ __html: activeScene ? activeScene.html : streamingHtml }} />
+              <div className={`${proseScale} prose-amber prose-story dropcap font-story-body max-w-none ${isStreaming ? 'story-hit' : ''}`} dangerouslySetInnerHTML={{ __html: displayHtml }} />
             </div>
           )}
         </div>

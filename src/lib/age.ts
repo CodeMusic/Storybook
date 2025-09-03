@@ -196,7 +196,8 @@ export function proseScaleClassForAgeRange(ageRange: string): string
   {
     return "prose-lg md:prose-xl";
   }
-  return "prose";
+  // Default adults: keep body comfortably large
+  return "prose-lg md:prose-xl";
 }
 
 export function headingSizeClassForAgeRange(ageRange: string): string
@@ -210,6 +211,7 @@ export function headingSizeClassForAgeRange(ageRange: string): string
   {
     return "text-xl md:text-2xl";
   }
-  return "text-lg";
+  // Default adults: a bit larger for readability
+  return "text-xl md:text-2xl";
 }
 
