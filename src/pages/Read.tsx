@@ -38,6 +38,8 @@ export default function ReadPage()
   const [audioEl, setAudioEl] = useState<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isSynthLoading, setIsSynthLoading] = useState<boolean>(false);
+  const [needsGesture, setNeedsGesture] = useState<boolean>(false);
+  const [audioCtx, setAudioCtx] = useState<AudioContext | null>(null);
 
   // Incremental markdown renderer that coexists with HTML
   function escapeHtml(unsafe: string): string
@@ -483,6 +485,18 @@ export default function ReadPage()
       if (!activeScene || !activeScene.html) { return; }
       if (isSynthLoading) { return; }
 
+      // Try to unlock audio on iOS/Safari by resuming an AudioContext in a user gesture
+      try
+      {
+        const Ctx: any = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (Ctx)
+        {
+          const ctx = audioCtx || new Ctx();
+          setAudioCtx(ctx);
+          if (ctx.state !== 'running') { await ctx.resume().catch(()=>{}); }
+        }
+      } catch {}
+
       // If we already have audio and an element, just toggle
       if (audioEl && audioUrl)
       {
@@ -493,8 +507,8 @@ export default function ReadPage()
         }
         else
         {
-          await audioEl.play();
-          setIsPlaying(true);
+          try { await audioEl.play(); setIsPlaying(true); setNeedsGesture(false); }
+          catch { setNeedsGesture(true); }
         }
         return;
       }
@@ -504,11 +518,14 @@ export default function ReadPage()
       const plain = (activeScene.html || "").replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
       const { url } = await voiceforge(plain);
       setAudioUrl(url);
-      const el = new Audio(url);
+      const el = new Audio();
+      el.preload = 'auto';
+      try { (el as any).crossOrigin = 'anonymous'; } catch {}
+      el.src = url;
       el.onended = () => setIsPlaying(false);
       setAudioEl(el);
-      await el.play();
-      setIsPlaying(true);
+      try { await el.play(); setIsPlaying(true); setNeedsGesture(false); }
+      catch { setNeedsGesture(true); setIsPlaying(false); }
     }
     catch (e: any)
     {
