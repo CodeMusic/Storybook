@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
-import { CornerUpLeft, Loader2, Play, Pause } from "lucide-react";
-import { expandChapter, expandChapterStream, genImage, exportBook, voiceforge } from "../services/n8n";
+import { CornerUpLeft, Loader2, Play, Pause, Download } from "lucide-react";
+import { expandChapter, expandChapterStream, genImage, exportBook, voiceforge, REGENERATE_BROKEN_IMAGES } from "../services/n8n";
 import { normalizeAgeRange, chapterRangeForAgeRange, proseScaleClassForAgeRange, headingSizeClassForAgeRange } from "../lib/age";
 
 export default function ReadPage()
@@ -26,6 +26,8 @@ export default function ReadPage()
   const [premise, setPremise] = useState<string>("");
   const proseScale = proseScaleClassForAgeRange(ageRange);
   const headingScale = headingSizeClassForAgeRange(ageRange);
+  const [hydrated, setHydrated] = useState<boolean>(false);
+  const [influence, setInfluence] = useState<string>("");
 
   // Streaming state for the active chapter (only on Read page)
   const [streamingHtml, setStreamingHtml] = useState<string>("");
@@ -34,6 +36,7 @@ export default function ReadPage()
   const [streamingChapterHeading, setStreamingChapterHeading] = useState<string>("");
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const STREAMING_KEY = "storyforge.streaming.v1";
+  const regenerateTriedRef = useRef<Record<number, boolean>>({});
 
   // Audio state for chapter narration
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
@@ -176,6 +179,8 @@ export default function ReadPage()
   }
 
   // Wrap words in spans for per-word animation
+  // Only the latest word should have strong animation (word-new)
+  // Earlier words in the same chunk get a subtle cue (word-recent)
   function wrapWords(html: string, newlyAddedWordCount: number, options?: { skipFirstWord?: boolean }): string
   {
     if (!html || !html.trim()) { return html; }
@@ -183,6 +188,7 @@ export default function ReadPage()
     const parts = html.split(/(<[^>]+>)/g);
     let textWordCounter = 0;
     let skippedFirst = false;
+    const newCount = Math.max(0, newlyAddedWordCount | 0);
     const wrapped = parts.map(part => {
       if (part.startsWith('<')) { return part; }
       // Split text into words and spaces, preserving punctuation
@@ -193,12 +199,49 @@ export default function ReadPage()
           skippedFirst = true;
           return `${w}${space}`;
         }
-        const isNew = textWordCounter > (Math.max(0, textWordCounter - newlyAddedWordCount));
-        const cls = isNew ? 'word word-new' : 'word';
+        // Determine recency band for this token relative to the end
+        // We treat only the very last word as new, and the preceding up to (newCount-1) as recent
+        const clsBase = 'word';
+        if (newCount > 0)
+        {
+          // Compute this token's position among all seen words so far in this text run
+          // Since we do not know total upfront for this fragment, we approximate by looking
+          // at the trailing window using a running counter and the provided newCount.
+          // This function is used on the full html string per frame, so tokens near the end
+          // will be wrapped later and receive the recent/new classes.
+          // Mark the last token as word-new and the prior ones in the same chunk as word-recent.
+          const idxFromEndEstimate = 0; // We'll instead base on modulo by deferring labeling until after pass
+        }
+        // Fallback: default label; we will re-label using a second pass below
+        const cls = clsBase;
         return `<span class="${cls}">${w}<\/span>${space}`;
       });
     }).join('');
-    return wrapped;
+    // Second pass: reassign classes to only the last "newCount" words,
+    // with the final one as word-new and earlier ones as word-recent.
+    if (newCount <= 0) { return wrapped; }
+    // Find all word spans and adjust the last window
+    const tokens = Array.from(wrapped.matchAll(/<span class=\"word\">([\s\S]*?)<\/span>/g));
+    if (tokens.length === 0) { return wrapped; }
+    const lastIndex = tokens.length - 1;
+    const startRecent = Math.max(0, lastIndex - newCount + 1);
+    let replaced = wrapped;
+    for (let i = lastIndex; i >= startRecent; i--)
+    {
+      const m = tokens[i];
+      if (!m) { continue; }
+      const full = m[0];
+      const inner = m[1];
+      const cls = (i === lastIndex) ? 'word word-new' : 'word word-recent';
+      const updated = `<span class=\"${cls}\">${inner}<\/span>`;
+      // Replace the last occurrence to target the correct token even if duplicates exist
+      const pos = replaced.lastIndexOf(full);
+      if (pos >= 0)
+      {
+        replaced = replaced.slice(0, pos) + updated + replaced.slice(pos + full.length);
+      }
+    }
+    return replaced;
   }
 
   function coerceHTMLString(raw: string): string
@@ -303,6 +346,7 @@ export default function ReadPage()
         } catch {}
       }
     } catch {}
+    setHydrated(true);
   }, []);
 
   // Fallback: use query string title before storage hydration completes
@@ -317,7 +361,10 @@ export default function ReadPage()
   // Export full book path
   useEffect(()=>{
     (async ()=>{
-      if (!doExport) return;
+      if (!doExport || !hydrated) return;
+      // Require content to be hydrated before exporting to avoid empty files
+      const hasScenes = Array.isArray(scenes) && scenes.length > 0;
+      if (!hasScenes) return;
       try{
         setLoading(true);
         const { downloadUrl, filename } = await exportBook({ scenes, coverUrl, meta: { title, toc, chapters } });
@@ -335,7 +382,7 @@ export default function ReadPage()
       finally { setLoading(false); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doExport]);
+  }, [doExport, hydrated, scenes.length]);
 
   const activeIdx = useMemo(()=>{
     if (typeof chapterParam === 'number' && !isNaN(chapterParam))
@@ -368,7 +415,7 @@ export default function ReadPage()
       setStreamingHtml("");
       setStreamingImageUrl(null);
 
-      // 1) Generate image first; preload and wait briefly for onload before starting text stream
+      // 1) Generate image first; set URL immediately so it appears before text, then preload in background
       let resolvedImageUrlEarly: string | null = null;
       try {
         const imgPrompt = `${title || "Untitled Codex"} (ages ${normAge}): Chapter ${chapterMeta.id} - ${chapterMeta.heading}. Genre ${genre}. Style ${style}.`;
@@ -377,19 +424,37 @@ export default function ReadPage()
         if (url)
         {
           resolvedImageUrlEarly = url;
-          // Preload to ensure it paints promptly when we render
-          const preload = new Promise<void>((resolve) => {
-            try {
+          // Make the image visible immediately
+          setStreamingImageUrl(url);
+          // Attempt to ensure the image is actually renderable before we start streaming text
+          // Some generators return a URL before pixels are ready; we wait briefly with one retry
+          const preloadOnce = () => new Promise<void>((resolve) => {
+            try
+            {
               const im = new Image();
               try { (im as any).decoding = 'async'; } catch {}
               try { (im as any).loading = 'eager'; } catch {}
               im.onload = () => resolve();
               im.onerror = () => resolve();
               im.src = url;
-            } catch { resolve(); }
+            }
+            catch { resolve(); }
           });
-          // Hint the browser to prioritize this image fetch
-          try {
+          const preloadWithRetry = async () =>
+          {
+            await preloadOnce();
+            // Small retry to handle transient 404-before-ready cases
+            await new Promise(res => setTimeout(res, 200));
+            await preloadOnce();
+          };
+          // Wait up to ~2.5s to give the image a chance to appear first
+          await Promise.race([
+            preloadWithRetry(),
+            new Promise(res => setTimeout(res, 2500))
+          ]);
+          // Hint the browser to prioritize fetch
+          try
+          {
             if (typeof document !== 'undefined')
             {
               const link = document.createElement('link');
@@ -399,10 +464,8 @@ export default function ReadPage()
               document.head.appendChild(link);
               setTimeout(()=>{ try { document.head.removeChild(link); } catch {} }, 15000);
             }
-          } catch {}
-          // Do not block indefinitely; give it up to 4s
-          await Promise.race([preload, new Promise(res => setTimeout(res, 4000))]);
-          setStreamingImageUrl(url);
+          }
+          catch {}
         }
       } catch { resolvedImageUrlEarly = null; }
 
@@ -410,7 +473,8 @@ export default function ReadPage()
       let rawText = "";
       let sawFirstChunk = false;
       let prevWordCount = 0;
-      for await (const chunk of expandChapterStream({ context, chapterIndex: idx, influence: influenceBracket, lengthHint }))
+      const combinedInfluence = (influence && influence.trim()) ? `${influenceBracket} ${influence.trim()}` : influenceBracket;
+      for await (const chunk of expandChapterStream({ context, chapterIndex: idx, influence: combinedInfluence, lengthHint }))
       {
         rawText += stripAgentProtocol(chunk);
         if (!sawFirstChunk && chunk && chunk.trim())
@@ -459,6 +523,8 @@ export default function ReadPage()
       setStreamingHtml("");
       // Keep streaming image until scene image is present to avoid flicker
       if (loading) { setLoading(false); }
+      // Clear influence after it has been used for this generation
+      try { setInfluence(""); } catch {}
     }
   }
 
@@ -669,6 +735,49 @@ export default function ReadPage()
     }
   }
 
+  async function handleDownloadAudio()
+  {
+    try
+    {
+      if (!audioUrl) { return; }
+      const safeTitle = (title || 'Storyforge').toString().replace(/[^a-z0-9\- _\(\)\[\]]+/gi, "_").trim() || 'storybook';
+      const chapterLabel = (activeScene ? activeScene.chapterId : streamingChapterId) || 1;
+      const fileName = `${safeTitle}-chapter-${chapterLabel}.mp3`;
+      // If already a blob/data URL, download directly
+      if (audioUrl.startsWith('blob:') || audioUrl.startsWith('data:'))
+      {
+        const a = document.createElement('a');
+        a.href = audioUrl;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        return;
+      }
+      // Try to fetch and convert to blob for a reliable download
+      try
+      {
+        const resp = await fetch(audioUrl);
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(()=>{ try { URL.revokeObjectURL(url); } catch {} }, 15000);
+        return;
+      }
+      catch
+      {
+        // Fallback: open in new tab
+        window.open(audioUrl, '_blank');
+      }
+    }
+    catch {}
+  }
+
   async function navigateWithTurn(nextQuery: any)
   {
     try {
@@ -710,13 +819,56 @@ export default function ReadPage()
               </div>
               {(activeScene?.imageUrl || streamingImageUrl) && (
                 <>
-                  <img src={(activeScene?.imageUrl || streamingImageUrl) as string} alt="Scene" loading="eager" decoding="async" fetchPriority="high" className="w-full h-auto rounded-lg border border-amber-200 mb-2" />
+                  <img
+                    src={(activeScene?.imageUrl || streamingImageUrl) as string}
+                    alt="Scene"
+                    loading="eager"
+                    decoding="async"
+                    fetchPriority="high"
+                    className="w-full h-auto rounded-lg border border-amber-200 mb-2"
+                    onError={async ()=>{
+                      try {
+                        const chapterId = activeScene ? activeScene.chapterId : (streamingChapterId || 0);
+                        if (!REGENERATE_BROKEN_IMAGES) { return; }
+                        if (!chapterId || regenerateTriedRef.current[chapterId]) { return; }
+                        regenerateTriedRef.current[chapterId] = true;
+                        const prompt = `${title || "Untitled Codex"} (ages ${normalizeAgeRange(ageRange)}): Chapter ${chapterId} - ${(activeScene ? activeScene.chapterHeading : streamingChapterHeading) || ''}.`;
+                        const img = await genImage(prompt);
+                        const url = img?.url || null;
+                        if (activeScene)
+                        {
+                          setScenes(prev => prev.map(s => s.chapterId === chapterId ? { ...s, imageUrl: url } : s));
+                        }
+                        else
+                        {
+                          setStreamingImageUrl(url);
+                        }
+                      } catch {}
+                    }}
+                  />
+
+                  {/* Influence panel: appears under the image to guide the NEXT chapter */}
+                  {!!nextChapter && !isStreaming && (
+                    <div className="mb-3 max-w-md">
+                      <label className="block text-xs font-medium text-amber-900 mb-1">Influence (optional)</label>
+                      <textarea
+                        value={influence}
+                        onChange={(e)=> setInfluence(e.target.value)}
+                        rows={3}
+                        placeholder="Suggest beats, tone, or details to prime the next chapter"
+                        className="w-full rounded-lg border border-amber-200 bg-white/70 backdrop-blur px-3 py-2 text-sm text-amber-900 placeholder:text-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                      />
+                      <div className="text-[11px] text-amber-700 mt-1">Used to guide the next chapter. Cleared after use.</div>
+                    </div>
+                  )}
+
                   {!!activeScene && !isStreaming && (
                     <div className="flex justify-end mb-3">
                       <button
                         onClick={audioRequested ? handlePlayPause : handleSpeak}
-                        disabled={isSynthLoading}
-                        className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm"
+                        disabled={isSynthLoading || isStreaming || !activeScene?.html}
+                        title={(isStreaming || !activeScene?.html) ? 'Waiting for generation…' : (isSynthLoading ? 'Preparing…' : (!audioRequested ? 'Speak narration' : (isPlaying ? 'Pause narration' : 'Play narration')))}
+                        className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
                         aria-label={(!audioRequested) ? 'Speak narration' : (isPlaying ? 'Pause narration' : 'Play narration')}
                       >
                         <span className="relative inline-flex h-4 w-4 items-center justify-center">
@@ -732,17 +884,44 @@ export default function ReadPage()
                         </span>
                         <span className="text-xs">{!audioRequested ? (isSynthLoading ? 'Preparing…' : 'Speak') : (isPlaying ? 'Pause' : (isSynthLoading ? 'Preparing…' : 'Play'))}</span>
                       </button>
+                      {audioUrl && (
+                        <button
+                          onClick={handleDownloadAudio}
+                          disabled={isSynthLoading}
+                          className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm"
+                          aria-label="Download narration audio"
+                        >
+                          <Download className="h-4 w-4" />
+                          <span className="text-xs">Download</span>
+                        </button>
+                      )}
                     </div>
                   )}
                 </>
               )}
               {/* If no image was rendered, still provide the play button above the prose */}
               {!activeScene?.imageUrl && !!activeScene && !isStreaming && (
-                <div className="flex justify-end mb-3">
+                <>
+                  {/* Influence panel when no image is present */}
+                  {!!nextChapter && (
+                    <div className="mb-3 max-w-md">
+                      <label className="block text-xs font-medium text-amber-900 mb-1">Influence (optional)</label>
+                      <textarea
+                        value={influence}
+                        onChange={(e)=> setInfluence(e.target.value)}
+                        rows={3}
+                        placeholder="Suggest beats, tone, or details to prime the next chapter"
+                        className="w-full rounded-lg border border-amber-200 bg-white/70 backdrop-blur px-3 py-2 text-sm text-amber-900 placeholder:text-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-300"
+                      />
+                      <div className="text-[11px] text-amber-700 mt-1">Used to guide the next chapter. Cleared after use.</div>
+                    </div>
+                  )}
+                  <div className="flex justify-end mb-3">
                   <button
                     onClick={audioRequested ? handlePlayPause : handleSpeak}
-                    disabled={isSynthLoading}
-                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm"
+                    disabled={isSynthLoading || isStreaming || !activeScene?.html}
+                    title={(isStreaming || !activeScene?.html) ? 'Waiting for generation…' : (isSynthLoading ? 'Preparing…' : (!audioRequested ? 'Speak narration' : (isPlaying ? 'Pause narration' : 'Play narration')))}
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     aria-label={(!audioRequested) ? 'Speak narration' : (isPlaying ? 'Pause narration' : 'Play narration')}
                   >
                     <span className="relative inline-flex h-4 w-4 items-center justify-center">
@@ -757,6 +936,33 @@ export default function ReadPage()
                         : <Play className={`h-4 w-4 relative ${isSynthLoading ? 'drop-shadow-[0_0_6px_rgba(245,158,11,0.9)]' : ''}`} />}
                     </span>
                     <span className="text-xs">{!audioRequested ? (isSynthLoading ? 'Preparing…' : 'Speak') : (isPlaying ? 'Pause' : (isSynthLoading ? 'Preparing…' : 'Play'))}</span>
+                  </button>
+                  {audioUrl && (
+                    <button
+                      onClick={handleDownloadAudio}
+                      disabled={isSynthLoading}
+                      className="ml-2 inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 hover:bg-amber-100 shadow-sm"
+                      aria-label="Download narration audio"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span className="text-xs">Download</span>
+                    </button>
+                  )}
+                  </div>
+                </>
+              )}
+              {isStreaming && (
+                <div className="flex justify-end mb-3">
+                  <button
+                    disabled
+                    title="Waiting for generation…"
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white/70 backdrop-blur px-3 py-1 text-amber-900 shadow-sm opacity-60 cursor-not-allowed"
+                    aria-label="Speak narration (disabled during generation)"
+                  >
+                    <span className="relative inline-flex h-4 w-4 items-center justify-center">
+                      <Play className="h-4 w-4" />
+                    </span>
+                    <span className="text-xs">Speak</span>
                   </button>
                 </div>
               )}

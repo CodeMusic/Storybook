@@ -293,15 +293,14 @@ export default function OutlinePage()
               )}
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              {chapters.length>0 && generatedIds.length >= chapters.length && (
-                <button
-                  onClick={() => router.push("/Read?export=1")}
-                  className="inline-flex items-center justify-center rounded-xl bg-amber-600 text-white px-5 py-3 shadow hover:bg-amber-700"
-                  disabled={loading}
-                >
-                  Export Full Book
-                </button>
-              )}
+              <button
+                onClick={() => router.push("/Read?export=1")}
+                disabled={loading || !(chapters.length>0 && generatedIds.length >= chapters.length)}
+                title={(chapters.length>0 && generatedIds.length >= chapters.length) ? 'Export the full book' : 'Generate all chapters before exporting'}
+                className={`inline-flex items-center justify-center rounded-xl px-5 py-3 shadow ${ (chapters.length>0 && generatedIds.length >= chapters.length) ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-amber-100 text-amber-900 border border-amber-300 opacity-70 cursor-not-allowed'}`}
+              >
+                Export Full Book
+              </button>
             </div>
           </div>
         </div>

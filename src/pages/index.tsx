@@ -9,22 +9,28 @@ export default function Home()
   const [idea, setIdea] = useState("");
   const [hasSession, setHasSession] = useState(false);
   const STORAGE_KEY = "storyforge.session.v1";
+  const [navigating, setNavigating] = useState(false);
 
   function onSubmit(e: React.FormEvent)
   {
     e.preventDefault();
+    if (navigating) { return; }
+    const q = new URLSearchParams();
+    const ideaTrim = idea.trim();
+    if (ideaTrim) q.set("idea", ideaTrim);
+    const target = `/Storyforge/${q.toString() ? `?${q.toString()}` : ""}`;
+    if (router.asPath === target) { return; }
     // If a new idea is provided, proactively clear any existing session so a fresh seed is guaranteed
     try {
       // New narrative arc: regenerate session to bind all subsequent calls
       regenerateSessionId();
       const raw = typeof window !== 'undefined' ? window.localStorage.getItem(STORAGE_KEY) : null;
       const data = raw ? JSON.parse(raw) : {};
-      const updated = { ...data, title: "", premise: idea.trim(), toc: null, chapters: [], scenes: [], seedSignature: undefined };
+      const updated = { ...data, title: "", premise: ideaTrim, toc: null, chapters: [], scenes: [], seedSignature: undefined };
       if (typeof window !== 'undefined') { window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated)); }
     } catch {}
-    const q = new URLSearchParams();
-    if (idea.trim()) q.set("idea", idea.trim());
-    router.push(`/Storyforge${q.toString() ? `?${q.toString()}` : ""}`);
+    setNavigating(true);
+    router.push(target).finally(()=> setNavigating(false));
   }
 
   useEffect(()=>{
@@ -85,7 +91,7 @@ export default function Home()
         </form>
         {hasSession && (
           <div className="max-w-xl mx-auto">
-            <button onClick={()=>router.push("/Outline")} className="mt-2 inline-flex items-center justify-center rounded-xl bg-amber-100 text-amber-900 px-5 py-3 border border-amber-300 w-full">
+            <button onClick={()=>router.push("/Outline/")} className="mt-2 inline-flex items-center justify-center rounded-xl bg-amber-100 text-amber-900 px-5 py-3 border border-amber-300 w-full">
               Continue last story
             </button>
           </div>

@@ -13,6 +13,9 @@ export const ENDPOINTS = {
   exportStory: `${BASE}/exportStory`, // → accept full package JSON
 };
 
+// Feature flag: attempt one-time regeneration of broken scene images when encountered
+export const REGENERATE_BROKEN_IMAGES: boolean = (process.env.NEXT_PUBLIC_REGEN_BROKEN_IMAGES || 'true').toLowerCase() === 'true' || (process.env.NEXT_PUBLIC_REGEN_BROKEN_IMAGES === '1');
+
 function basicAuthHeader(): string {
   const raw = `${N8N_USER}:${N8N_PASS}`;
   try {

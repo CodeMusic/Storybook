@@ -111,3 +111,11 @@ html, body, #__next {
 .words-flash .word { animation: word-flash 320ms ease-in-out; }
 
 
+/* Subtle nudge for recently added tokens to avoid cognitive jank */
+@keyframes word-nudge {
+  0% { transform: translateY(0.02em); text-shadow: 0 0 0 rgba(245,158,11,0); }
+  50% { transform: translateY(0); text-shadow: 0 0 6px rgba(245,158,11,0.25); }
+  100% { transform: translateY(0); text-shadow: 0 0 0 rgba(245,158,11,0); }
+}
+.word-recent { animation: word-nudge 260ms ease-out both; }
+

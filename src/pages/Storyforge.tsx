@@ -86,7 +86,7 @@ export default function StoryforgePage(){
         const updated = { ...data, ...payload, toc: null, chapters: [], scenes: [], seedSignature: undefined };
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       } catch {}
-      router.push("/Outline?reseed=1");
+      router.push("/Outline/?reseed=1");
     } finally {}
   }
 
